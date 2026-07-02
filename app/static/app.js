@@ -52,6 +52,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const smtpFrom = document.getElementById("smtp-from");
     const smtpTo = document.getElementById("smtp-to");
     
+    // IMAP inputs
+    const imapServer = document.getElementById("imap-server");
+    const imapPort = document.getElementById("imap-port");
+    const imapUsername = document.getElementById("imap-username");
+    const imapPassword = document.getElementById("imap-password");
+    const imapEnabled = document.getElementById("imap-enabled");
+    
     const btnSaveConfig = document.getElementById("btn-save-config");
     
     const spotifyConnTitle = document.getElementById("spotify-conn-title");
@@ -183,6 +190,13 @@ document.addEventListener("DOMContentLoaded", () => {
             smtpPassword.value = config.smtp_password || "";
             smtpFrom.value = config.smtp_from_email || "";
             smtpTo.value = config.smtp_to_email || "";
+            
+            // IMAP
+            imapServer.value = config.imap_server || "";
+            imapPort.value = config.imap_port || 993;
+            imapUsername.value = config.imap_username || "";
+            imapPassword.value = config.imap_password || "";
+            imapEnabled.checked = config.imap_enabled || false;
         } catch (err) {
             console.error("Fout bij laden configuratie:", err);
         }
@@ -209,7 +223,14 @@ document.addEventListener("DOMContentLoaded", () => {
             smtp_username: smtpUsername.value.trim() || null,
             smtp_password: smtpPassword.value || null,
             smtp_from_email: smtpFrom.value.trim() || null,
-            smtp_to_email: smtpTo.value.trim() || null
+            smtp_to_email: smtpTo.value.trim() || null,
+            
+            // IMAP
+            imap_server: imapServer.value.trim() || null,
+            imap_port: parseInt(imapPort.value) || 993,
+            imap_username: imapUsername.value.trim() || null,
+            imap_password: imapPassword.value || null,
+            imap_enabled: imapEnabled.checked
         };
         
         try {

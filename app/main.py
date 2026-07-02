@@ -31,10 +31,18 @@ async def background_sync_loop():
                 # 1. Sync RSS feeds
                 new_count = parse_rss_feeds(db)
                 
-                # 2. Score nieuwe concerten
+                # 2. Sync IMAP email newsletters
+                from app.services.email_receiver import fetch_and_parse_emails
+                try:
+                    new_email_count = fetch_and_parse_emails(db)
+                    new_count += new_email_count
+                except Exception as email_err:
+                    print(f"[Background Task] Fout bij ophalen e-mails: {email_err}")
+                
+                # 3. Score nieuwe concerten
                 high_matches = score_all_new_concerts(db)
                 
-                # 3. Verstuur e-mails voor nieuwe aanbevelingen
+                # 4. Verstuur e-mails voor nieuwe aanbevelingen
                 if high_matches:
                     to_notify = [c for c in high_matches if not c.notified]
                     if to_notify:
@@ -121,6 +129,13 @@ class ConfigUpdate(BaseModel):
     smtp_password: Optional[str] = ""
     smtp_from_email: Optional[str] = ""
     smtp_to_email: Optional[str] = ""
+    
+    # IMAP (instelbaar via GUI)
+    imap_server: Optional[str] = ""
+    imap_port: Optional[int] = 993
+    imap_username: Optional[str] = ""
+    imap_password: Optional[str] = ""
+    imap_enabled: Optional[bool] = False
 
 class VenueCreateUpdate(BaseModel):
     name: str
@@ -182,8 +197,16 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db)):
     config.smtp_from_email = data.smtp_from_email
     config.smtp_to_email = data.smtp_to_email
     
+    # IMAP
+    config.imap_server = data.imap_server
+    config.imap_port = data.imap_port
+    config.imap_username = data.imap_username
+    config.imap_password = data.imap_password
+    config.imap_enabled = data.imap_enabled
+    
     db.commit()
     db.refresh(config)
+
     
     # Herscore alle concerten met status 'new' omdat de locatie/radii zijn veranderd
     from app.services.scoring import score_all_new_concerts
@@ -359,6 +382,15 @@ def trigger_feed_sync(background_tasks: BackgroundTasks, db: Session = Depends(g
         sync_db = SessionLocal()
         try:
             new_count = parse_rss_feeds(sync_db)
+            
+            # Sync emails
+            from app.services.email_receiver import fetch_and_parse_emails
+            try:
+                new_email_count = fetch_and_parse_emails(sync_db)
+                new_count += new_email_count
+            except Exception as email_err:
+                print(f"Error fetching emails during manual sync: {email_err}")
+                
             high_matches = score_all_new_concerts(sync_db)
             if high_matches:
                 to_notify = [c for c in high_matches if not c.notified]

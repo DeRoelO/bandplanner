@@ -265,8 +265,42 @@
                             <label for="smtp-to">Ontvanger E-mail (To)</label>
                             <input type="text" id="smtp-to" placeholder="ontvanger@domein.nl">
                         </div>
+                </div>
+
+                <!-- IMAP Nieuwsbrief Mailbox -->
+                <div class="panel">
+                    <h2>Nieuwsbrieven Automatisch Inlezen (IMAP)</h2>
+                    <p class="text-muted" style="margin-bottom: 20px;">
+                        Verbind Bandplanner met een specifieke mailbox (bijv. een apart e-mailadres waar je al je poppodium-nieuwsbrieven naar doorstuurt). Alle ongelezen e-mails worden automatisch door Gemini geanalyseerd op concerttips.
+                    </p>
+                    
+                    <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                        <input type="checkbox" id="imap-enabled" style="width: auto; cursor: pointer;">
+                        <label for="imap-enabled" style="margin-bottom: 0; cursor: pointer; font-weight: bold; color: #ffffff;">Automatisch inlezen inschakelen</label>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label for="imap-server">IMAP Server</label>
+                            <input type="text" id="imap-server" placeholder="Bijv. imap.gmail.com">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="imap-port">IMAP Poort</label>
+                            <input type="number" id="imap-port" value="993">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="imap-username">IMAP Gebruikersnaam (Email)</label>
+                            <input type="text" id="imap-username" placeholder="gebruikersnaam@gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="imap-password">IMAP Wachtwoord / App Wachtwoord</label>
+                            <input type="password" id="imap-password" placeholder="Wachtwoord">
+                        </div>
                     </div>
                 </div>
+
 
                 <!-- Opslaan Knop -->
                 <div style="margin-bottom: 30px; display: flex; justify-content: flex-end;">

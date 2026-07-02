@@ -31,6 +31,14 @@ class UserConfig(Base):
     smtp_password = Column(String, nullable=True)
     smtp_from_email = Column(String, nullable=True)
     smtp_to_email = Column(String, nullable=True)
+    
+    # IMAP Mailbox Config (automatisch inlezen nieuwsbrieven)
+    imap_server = Column(String, nullable=True)
+    imap_port = Column(Integer, nullable=True, default=993)
+    imap_username = Column(String, nullable=True)
+    imap_password = Column(String, nullable=True)
+    imap_enabled = Column(Boolean, nullable=False, default=False)
+
 
 
 class Venue(Base):

@@ -84,7 +84,7 @@ def parse_newsletter_with_gemini(db: Session, text_content: str) -> List[Extract
     """
     
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-flash-lite-latest',
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",

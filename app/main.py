@@ -128,10 +128,14 @@ async def lifespan(app: FastAPI):
     try:
         from app.database import Base, engine
         from app.seed_venues import seed_data
+        
+        # Zorg dat config.json bestaat
+        load_user_config()
+        
         Base.metadata.create_all(bind=engine)
         apply_automatic_migrations(engine)
         seed_data(db)
-        print("Database geïnitialiseerd en podia geseed.")
+        print("Database geïnitialiseerd, config.json geladen en podia geseed.")
     except Exception as e:
         print(f"Fout bij database initialisatie: {e}")
     finally:

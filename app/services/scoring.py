@@ -1,9 +1,11 @@
 import datetime
+from typing import Optional, List
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Concert, Venue, UserConfig, ArtistPreference
 from app.services.distance import calculate_haversine_distance
 from app.services.spotify import get_spotify_client, refresh_spotify_token
+
 
 def lookup_artist_on_spotify(db: Session, artist_name: str) -> Optional[ArtistPreference]:
     """

@@ -3,11 +3,12 @@ import email
 from email.header import decode_header
 import bs4
 from sqlalchemy.orm import Session
-from app.models import UserConfig, Concert, ArtistPreference
+from app.models import Concert, ArtistPreference
 from app.config import settings
 from app.services.gemini import parse_newsletter_with_gemini
 from app.services.rss import find_or_create_venue
 from app.services.scoring import score_concert
+from app.services.config_manager import load_user_config
 import datetime
 
 def clean_html(html_content: str) -> str:
@@ -38,17 +39,15 @@ def fetch_and_parse_emails(db: Session) -> int:
     Verbindt met de geconfigureerde IMAP mailbox, haalt ongelezen e-mails op,
     stuurt ze naar Gemini en voegt gevonden concerten toe aan de database.
     """
-    user_config = db.query(UserConfig).first()
+    user_config = load_user_config()
     if not user_config:
         return 0
         
-    server = user_config.smtp_server  # We kunnen imap_server apart opslaan of raden
-    # Beter om expliciete IMAP configuratie uit de DB te lezen!
-    imap_server = getattr(user_config, "imap_server", "")
-    imap_port = getattr(user_config, "imap_port", 993)
-    imap_username = getattr(user_config, "imap_username", "")
-    imap_password = getattr(user_config, "imap_password", "")
-    imap_enabled = getattr(user_config, "imap_enabled", False)
+    imap_server = user_config.get("imap_server", "")
+    imap_port = user_config.get("imap_port", 993)
+    imap_username = user_config.get("imap_username", "")
+    imap_password = user_config.get("imap_password", "")
+    imap_enabled = user_config.get("imap_enabled", False)
     
     if not imap_enabled or not imap_server or not imap_username or not imap_password:
         print("IMAP e-mailontvangst is niet ingeschakeld of niet volledig geconfigureerd.")

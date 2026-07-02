@@ -181,7 +181,7 @@ document.addEventListener("DOMContentLoaded", () => {
             geminiKey.value = config.gemini_api_key || "";
             spotifyId.value = config.spotify_client_id || "";
             spotifySecret.value = config.spotify_client_secret || "";
-            spotifyRedirect.value = config.spotify_redirect_uri || "http://localhost:8080/callback";
+            spotifyRedirect.value = config.spotify_redirect_uri || "http://127.0.0.1:8080/callback";
             
             // SMTP
             smtpServer.value = config.smtp_server || "";
@@ -215,7 +215,7 @@ document.addEventListener("DOMContentLoaded", () => {
             gemini_api_key: geminiKey.value.trim() || null,
             spotify_client_id: spotifyId.value.trim() || null,
             spotify_client_secret: spotifySecret.value.trim() || null,
-            spotify_redirect_uri: spotifyRedirect.value.trim() || "http://localhost:8080/callback",
+            spotify_redirect_uri: spotifyRedirect.value.trim() || "http://127.0.0.1:8080/callback",
             
             // SMTP
             smtp_server: smtpServer.value.trim() || null,

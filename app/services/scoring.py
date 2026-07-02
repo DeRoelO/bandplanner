@@ -2,7 +2,8 @@ import datetime
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import Concert, Venue, UserConfig, ArtistPreference
+from app.models import Concert, Venue, ArtistPreference
+from app.services.config_manager import load_user_config
 from app.services.distance import calculate_haversine_distance
 from app.services.spotify import get_spotify_client, refresh_spotify_token
 
@@ -12,14 +13,14 @@ def lookup_artist_on_spotify(db: Session, artist_name: str) -> Optional[ArtistPr
     Zoekt een artiest op via Spotify Search en slaat de resultaten op in de database.
     Dit cachet de genres en populariteit van de artiest.
     """
-    user_config = db.query(UserConfig).first()
-    if not user_config or not user_config.spotify_refresh_token:
+    user_config = load_user_config()
+    if not user_config or not user_config.get("spotify_refresh_token"):
         # Spotify niet gekoppeld, we kunnen niet zoeken
         return None
         
     try:
         # Verkrijg geldige client
-        access_token = refresh_spotify_token(db, user_config)
+        access_token = refresh_spotify_token()
         sp = get_spotify_client(access_token)
         
         # Zoek artiest
@@ -97,26 +98,31 @@ def calculate_genre_match_score(artist_genres: List[str], top_genres_freq: dict)
     normalized_weight = (total_weight / len(artist_genres)) / max_freq
     return min(10.0, normalized_weight * 10.0)
 
-def score_concert(db: Session, concert: Concert, top_genres_freq: dict, user_config: UserConfig) -> float:
+def score_concert(db: Session, concert: Concert, top_genres_freq: dict, user_config: Optional[dict] = None) -> float:
     """
     Berekent de totale match-score voor een concert.
     """
+    if not user_config:
+        user_config = load_user_config()
+        
     # 1. AFSTANDSSCORE (0-10)
     distance_score = 0.0
     if concert.venue:
+        home_latitude = user_config.get("home_latitude", 52.0907)
+        home_longitude = user_config.get("home_longitude", 5.1214)
         distance = calculate_haversine_distance(
-            user_config.home_latitude, user_config.home_longitude,
+            home_latitude, home_longitude,
             concert.venue.latitude, concert.venue.longitude
         )
         
         # Bepaal max radius op basis van categorie
         category = concert.venue.category
         if category == "small":
-            max_radius = user_config.radius_small
+            max_radius = user_config.get("radius_small", 25.0)
         elif category == "medium":
-            max_radius = user_config.radius_medium
+            max_radius = user_config.get("radius_medium", 60.0)
         else: # large
-            max_radius = user_config.radius_large
+            max_radius = user_config.get("radius_large", 250.0)
             
         if distance <= max_radius:
             # Kortere afstand = hogere score
@@ -173,7 +179,7 @@ def score_all_new_concerts(db: Session) -> List[Concert]:
     Berekent de score voor alle concerten die nog de status 'new' hebben.
     Retourneert de lijst met concerten die een hoge score hebben behaald (bijv. >= 6.0).
     """
-    user_config = db.query(UserConfig).first()
+    user_config = load_user_config()
     if not user_config:
         # Geen config, we kunnen niks scoren
         return []

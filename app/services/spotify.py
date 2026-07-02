@@ -4,22 +4,25 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import ArtistPreference, UserConfig
+from app.models import ArtistPreference
+from app.services.config_manager import load_user_config, save_user_config
 
-def get_spotify_oauth(db: Session, redirect_uri: str = None) -> SpotifyOAuth:
+def get_spotify_oauth(db: Session = None, redirect_uri: str = None) -> SpotifyOAuth:
     """
-    Creëert de SpotifyOAuth manager op basis van instellingen in de DB of .env.
+    Creëert de SpotifyOAuth manager op basis van instellingen uit het config.json volume of .env.
     """
-    user_config = db.query(UserConfig).first()
-    client_id = user_config.spotify_client_id if user_config and user_config.spotify_client_id else settings.SPOTIFY_CLIENT_ID
-    client_secret = user_config.spotify_client_secret if user_config and user_config.spotify_client_secret else settings.SPOTIFY_CLIENT_SECRET
+    user_config = load_user_config()
+    client_id = user_config.get("spotify_client_id") or settings.SPOTIFY_CLIENT_ID
+    client_secret = user_config.get("spotify_client_secret") or settings.SPOTIFY_CLIENT_SECRET
     
-    # Gebruik specifieke redirect_uri, of die uit DB, of als fallback uit config
-    db_redirect = user_config.spotify_redirect_uri if user_config and user_config.spotify_redirect_uri else settings.SPOTIFY_REDIRECT_URI
+    # Gebruik specifieke redirect_uri, of die uit config, of als fallback uit settings
+    db_redirect = user_config.get("spotify_redirect_uri") or settings.SPOTIFY_REDIRECT_URI
+    if db_redirect == "http://localhost:8080/callback":
+        db_redirect = "http://127.0.0.1:8080/callback"
     final_redirect = redirect_uri or db_redirect
     
     if not client_id or not client_secret:
-        raise ValueError("Spotify Client ID en Secret zijn niet geconfigureerd in de database of .env.")
+        raise ValueError("Spotify Client ID en Secret zijn niet geconfigureerd.")
 
     return SpotifyOAuth(
         client_id=client_id,
@@ -34,43 +37,47 @@ def get_spotify_client(access_token: str) -> spotipy.Spotify:
     """
     return spotipy.Spotify(auth=access_token)
 
-def refresh_spotify_token(db: Session, user_config: UserConfig) -> str:
+def refresh_spotify_token(db: Session = None, user_config: Any = None) -> str:
     """
-    Refresht het Spotify access token als dit is verlopen en slaat het op in de database.
+    Refresht het Spotify access token als dit is verlopen en slaat het op in config.json.
     Retourneert het geldige access token.
     """
-    if not user_config.spotify_refresh_token:
+    config = load_user_config()
+    refresh_token = config.get("spotify_refresh_token")
+    if not refresh_token:
         raise ValueError("Geen Spotify refresh token beschikbaar. Koppel eerst je Spotify account.")
         
-    oauth = get_spotify_oauth(db)
+    oauth = get_spotify_oauth()
     
     # Controleer of het token is verlopen of bijna is verlopen (binnen 60 seconden)
     now = int(time.time())
-    if user_config.spotify_access_token and user_config.spotify_token_expires_at and (user_config.spotify_token_expires_at - now > 60):
-        return user_config.spotify_access_token
+    access_token = config.get("spotify_access_token")
+    expires_at = config.get("spotify_token_expires_at")
+    if access_token and expires_at and (expires_at - now > 60):
+        return access_token
         
     # Refresh het token
-    token_info = oauth.refresh_access_token(user_config.spotify_refresh_token)
+    token_info = oauth.refresh_access_token(refresh_token)
     
-    # Sla de nieuwe tokens op
-    user_config.spotify_access_token = token_info["access_token"]
-    user_config.spotify_refresh_token = token_info.get("refresh_token", user_config.spotify_refresh_token)
-    user_config.spotify_token_expires_at = token_info["expires_at"]
+    # Sla de nieuwe tokens op in config.json
+    config["spotify_access_token"] = token_info["access_token"]
+    config["spotify_refresh_token"] = token_info.get("refresh_token", refresh_token)
+    config["spotify_token_expires_at"] = token_info["expires_at"]
     
-    db.commit()
-    return user_config.spotify_access_token
+    save_user_config(config)
+    return config["spotify_access_token"]
 
 
 def sync_spotify_preferences(db: Session) -> int:
     """
     Synchroniseert de top artiesten en genres van de gebruiker met de database.
     """
-    user_config = db.query(UserConfig).first()
-    if not user_config or not user_config.spotify_refresh_token:
+    config = load_user_config()
+    if not config or not config.get("spotify_refresh_token"):
         raise ValueError("Spotify is nog niet geconfigureerd of gekoppeld.")
         
     # Zorg dat we een geldig token hebben
-    access_token = refresh_spotify_token(db, user_config)
+    access_token = refresh_spotify_token()
     sp = get_spotify_client(access_token)
     
     # We halen top-artiesten op uit verschillende periodes voor een compleet beeld

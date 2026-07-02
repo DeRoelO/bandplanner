@@ -4,24 +4,25 @@ from email.mime.text import MIMEText
 from typing import List
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import Concert, UserConfig
+from app.models import Concert
+from app.services.config_manager import load_user_config
 
 def send_email_notification(db: Session, subject: str, html_content: str) -> bool:
     """
     Algemene helper om een HTML e-mail te sturen via SMTP.
-    Gebruikt SMTP instellingen uit de DB of .env als fallback.
+    Gebruikt SMTP instellingen uit het config.json volume of .env als fallback.
     """
-    user_config = db.query(UserConfig).first()
+    user_config = load_user_config()
     
-    server_addr = user_config.smtp_server if user_config and user_config.smtp_server else settings.SMTP_SERVER
-    port = user_config.smtp_port if user_config and user_config.smtp_port else settings.SMTP_PORT
-    username = user_config.smtp_username if user_config and user_config.smtp_username else settings.SMTP_USERNAME
-    password = user_config.smtp_password if user_config and user_config.smtp_password else settings.SMTP_PASSWORD
-    from_email = user_config.smtp_from_email if user_config and user_config.smtp_from_email else settings.SMTP_FROM_EMAIL
-    to_email = user_config.smtp_to_email if user_config and user_config.smtp_to_email else settings.SMTP_TO_EMAIL
+    server_addr = user_config.get("smtp_server") or settings.SMTP_SERVER
+    port = user_config.get("smtp_port") or settings.SMTP_PORT
+    username = user_config.get("smtp_username") or settings.SMTP_USERNAME
+    password = user_config.get("smtp_password") or settings.SMTP_PASSWORD
+    from_email = user_config.get("smtp_from_email") or settings.SMTP_FROM_EMAIL
+    to_email = user_config.get("smtp_to_email") or settings.SMTP_TO_EMAIL
     
     if not all([server_addr, username, password, to_email]):
-        print("SMTP e-mailnotificaties zijn niet volledig geconfigureerd in de database of .env. E-mail overgeslagen.")
+        print("SMTP e-mailnotificaties zijn niet volledig geconfigureerd in config.json of .env. E-mail overgeslagen.")
         return False
         
     try:

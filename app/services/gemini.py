@@ -4,7 +4,7 @@ from google import genai
 from google.genai import types
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import UserConfig
+from app.services.config_manager import load_user_config
 
 class ExtractedConcert(BaseModel):
     artist: str = Field(description="De naam van de artiest, band of act.")
@@ -21,8 +21,8 @@ def parse_newsletter_with_gemini(db: Session, text_content: str) -> List[Extract
     """
     Stuurt de tekst van een nieuwsbrief naar Gemini om concerten en ticketinformatie te extraheren.
     """
-    user_config = db.query(UserConfig).first()
-    api_key = user_config.gemini_api_key if user_config and user_config.gemini_api_key else settings.GEMINI_API_KEY
+    user_config = load_user_config()
+    api_key = user_config.get("gemini_api_key") or settings.GEMINI_API_KEY
     
     if not api_key:
         raise ValueError("GEMINI_API_KEY is niet ingesteld in de database of .env.")

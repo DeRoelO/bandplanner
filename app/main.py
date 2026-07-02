@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import get_db, SessionLocal
 from app.models import Concert, Venue, UserConfig, ArtistPreference
+from app.services.config_manager import load_user_config, save_user_config
 from app.services.spotify import get_spotify_oauth, sync_spotify_preferences
 from app.services.rss import parse_rss_feeds
 from app.services.scoring import score_all_new_concerts, score_concert
@@ -207,76 +208,29 @@ class EmailParseRequest(BaseModel):
     email_text: str
 
 # --- API Routes ---
-
-# 1. Configuur Routes
+# 1. Configuur Routes
 @app.get("/api/config")
-def get_config(db: Session = Depends(get_db)):
-    config = db.query(UserConfig).first()
-    if not config:
-        config = UserConfig(
-            home_latitude=settings.DEFAULT_HOME_LATITUDE,
-            home_longitude=settings.DEFAULT_HOME_LONGITUDE,
-            radius_small=settings.DEFAULT_RADIUS_SMALL,
-            radius_medium=settings.DEFAULT_RADIUS_MEDIUM,
-            radius_large=settings.DEFAULT_RADIUS_LARGE
-        )
-        db.add(config)
-        db.commit()
-        db.refresh(config)
-    return config
+def get_config():
+    return load_user_config()
 
 @app.post("/api/config")
 def update_config(data: ConfigUpdate, db: Session = Depends(get_db)):
-    config = db.query(UserConfig).first()
-    if not config:
-        config = UserConfig()
-        db.add(config)
-        
-    config.home_latitude = data.home_latitude
-    config.home_longitude = data.home_longitude
-    config.radius_small = data.radius_small
-    config.radius_medium = data.radius_medium
-    config.radius_large = data.radius_large
-    
-    # Keys
-    config.gemini_api_key = data.gemini_api_key
-    config.spotify_client_id = data.spotify_client_id
-    config.spotify_client_secret = data.spotify_client_secret
-    config.spotify_redirect_uri = data.spotify_redirect_uri
-    
-    # SMTP
-    config.smtp_server = data.smtp_server
-    config.smtp_port = data.smtp_port
-    config.smtp_username = data.smtp_username
-    config.smtp_password = data.smtp_password
-    config.smtp_from_email = data.smtp_from_email
-    config.smtp_to_email = data.smtp_to_email
-    
-    # IMAP
-    config.imap_server = data.imap_server
-    config.imap_port = data.imap_port
-    config.imap_username = data.imap_username
-    config.imap_password = data.imap_password
-    config.imap_enabled = data.imap_enabled
-    
-    db.commit()
-    db.refresh(config)
-
+    config_dict = data.model_dump()
+    save_user_config(config_dict)
     
     # Herscore alle concerten met status 'new' omdat de locatie/radii zijn veranderd
     from app.services.scoring import score_all_new_concerts
     score_all_new_concerts(db)
     
-    return config
+    return config_dict
 
 # 2. Spotify Auth & Sync Routes
 @app.get("/api/spotify/status")
 def get_spotify_status(db: Session = Depends(get_db)):
-    config = db.query(UserConfig).first()
+    config = load_user_config()
     
-    client_id = config.spotify_client_id if config and config.spotify_client_id else settings.SPOTIFY_CLIENT_ID
-    client_secret = config.spotify_client_secret if config and config.spotify_client_secret else settings.SPOTIFY_CLIENT_SECRET
-    connected = config is not None and config.spotify_refresh_token is not None
+    client_id = config.get("spotify_client_id") or settings.SPOTIFY_CLIENT_ID
+    connected = config.get("spotify_refresh_token") is not None
     
     pref_count = db.query(ArtistPreference).filter(
         ArtistPreference.source == "top_artist"
@@ -286,7 +240,9 @@ def get_spotify_status(db: Session = Depends(get_db)):
         ArtistPreference.source == "genre_match"
     ).count()
     
-    db_redirect = config.spotify_redirect_uri if config and config.spotify_redirect_uri else settings.SPOTIFY_REDIRECT_URI
+    db_redirect = config.get("spotify_redirect_uri") or settings.SPOTIFY_REDIRECT_URI
+    if db_redirect == "http://localhost:8080/callback":
+        db_redirect = "http://127.0.0.1:8080/callback"
     
     return {
         "connected": connected,
@@ -297,34 +253,31 @@ def get_spotify_status(db: Session = Depends(get_db)):
     }
 
 @app.get("/login/spotify")
-def login_spotify(db: Session = Depends(get_db)):
-    config = db.query(UserConfig).first()
-    client_id = config.spotify_client_id if config and config.spotify_client_id else settings.SPOTIFY_CLIENT_ID
-    client_secret = config.spotify_client_secret if config and config.spotify_client_secret else settings.SPOTIFY_CLIENT_SECRET
+def login_spotify():
+    config = load_user_config()
+    client_id = config.get("spotify_client_id") or settings.SPOTIFY_CLIENT_ID
+    client_secret = config.get("spotify_client_secret") or settings.SPOTIFY_CLIENT_SECRET
     
     if not client_id or not client_secret:
         raise HTTPException(
             status_code=400, 
-            detail="Spotify Client ID en Secret zijn niet geconfigureerd in de database of .env."
+            detail="Spotify Client ID en Secret zijn niet geconfigureerd."
         )
-    oauth = get_spotify_oauth(db)
+    oauth = get_spotify_oauth()
     auth_url = oauth.get_authorize_url()
     return RedirectResponse(url=auth_url)
 
 @app.get("/callback")
 def spotify_callback(code: str, db: Session = Depends(get_db)):
-    oauth = get_spotify_oauth(db)
+    oauth = get_spotify_oauth()
     try:
         token_info = oauth.get_access_token(code, as_dict=True)
-        config = db.query(UserConfig).first()
-        if not config:
-            config = UserConfig()
-            db.add(config)
-            
-        config.spotify_refresh_token = token_info["refresh_token"]
-        config.spotify_access_token = token_info["access_token"]
-        config.spotify_token_expires_at = token_info["expires_at"]
-        db.commit()
+        config = load_user_config()
+        
+        config["spotify_refresh_token"] = token_info["refresh_token"]
+        config["spotify_access_token"] = token_info["access_token"]
+        config["spotify_token_expires_at"] = token_info["expires_at"]
+        save_user_config(config)
         
         # Directe sync van Spotify smaakprofiel
         sync_spotify_preferences(db)

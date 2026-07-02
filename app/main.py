@@ -67,6 +67,59 @@ async def background_sync_loop():
         await asyncio.sleep(12 * 3600)
 
 
+def apply_automatic_migrations(db_engine):
+    from sqlalchemy import inspect, text
+    inspector = inspect(db_engine)
+    
+    # Als de tabel er nog niet is, doet create_all het werk
+    if not inspector.has_table("user_config"):
+        return
+        
+    columns = [c["name"] for c in inspector.get_columns("user_config")]
+    
+    try:
+        with db_engine.connect() as conn:
+            # Keys
+            if "gemini_api_key" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN gemini_api_key VARCHAR"))
+            if "spotify_client_id" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN spotify_client_id VARCHAR"))
+            if "spotify_client_secret" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN spotify_client_secret VARCHAR"))
+            if "spotify_redirect_uri" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN spotify_redirect_uri VARCHAR"))
+                
+            # SMTP
+            if "smtp_server" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN smtp_server VARCHAR"))
+            if "smtp_port" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN smtp_port INTEGER"))
+            if "smtp_username" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN smtp_username VARCHAR"))
+            if "smtp_password" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN smtp_password VARCHAR"))
+            if "smtp_from_email" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN smtp_from_email VARCHAR"))
+            if "smtp_to_email" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN smtp_to_email VARCHAR"))
+                
+            # IMAP
+            if "imap_server" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN imap_server VARCHAR"))
+            if "imap_port" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN imap_port INTEGER"))
+            if "imap_username" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN imap_username VARCHAR"))
+            if "imap_password" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN imap_password VARCHAR"))
+            if "imap_enabled" not in columns:
+                conn.execute(text("ALTER TABLE user_config ADD COLUMN imap_enabled BOOLEAN DEFAULT 0"))
+                
+            conn.commit()
+            print("Automatische database schema-migratie voltooid.")
+    except Exception as err:
+        print(f"Fout bij uitvoeren van automatische database migratie: {err}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Opstarten database & seeden
@@ -75,12 +128,14 @@ async def lifespan(app: FastAPI):
         from app.database import Base, engine
         from app.seed_venues import seed_data
         Base.metadata.create_all(bind=engine)
+        apply_automatic_migrations(engine)
         seed_data(db)
         print("Database geïnitialiseerd en podia geseed.")
     except Exception as e:
         print(f"Fout bij database initialisatie: {e}")
     finally:
         db.close()
+
         
     # Start de achtergrondtaak
     sync_task = asyncio.create_task(background_sync_loop())

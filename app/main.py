@@ -425,7 +425,7 @@ def parse_email_newsletter(data: EmailParseRequest, db: Session = Depends(get_db
     try:
         extracted = parse_newsletter_with_gemini(db, data.email_text)
         
-        user_config = db.query(UserConfig).first()
+        user_config = load_user_config()
         if not user_config:
             raise HTTPException(status_code=400, detail="Gebruikersconfiguratie ontbreekt.")
             

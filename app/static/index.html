@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bandplanner — Personal Concert Agenda</title>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-guitar logo-icon"></i>
+                <span class="logo-text">Bandplanner</span>
+            </div>
+            
+            <nav class="nav-menu">
+                <a class="nav-item active" data-tab="matches">
+                    <i class="fa-solid fa-fire"></i>
+                    <span>Aanbevelingen</span>
+                </a>
+                <a class="nav-item" data-tab="venues">
+                    <i class="fa-solid fa-map-location-dot"></i>
+                    <span>Podia & Zalen</span>
+                </a>
+                <a class="nav-item" data-tab="parser">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Gemini Parser</span>
+                </a>
+                <a class="nav-item" data-tab="settings">
+                    <i class="fa-solid fa-sliders"></i>
+                    <span>Instellingen</span>
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <span>Versie 1.0.0</span>
+            </div>
+        </aside>
+        
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- HEADER -->
+            <header>
+                <div>
+                    <h1 id="page-title">Aanbevelingen</h1>
+                    <p class="subtitle" id="page-subtitle">Jouw gepersonaliseerde concert agenda</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="btn-sync-feeds">
+                        <i class="fa-solid fa-rotate"></i> Sync Feeds
+                    </button>
+                </div>
+            </header>
+
+            <!-- TAB: MATCHES -->
+            <div class="tab-content active" id="tab-matches">
+                <div class="filter-bar">
+                    <button class="filter-pill active" data-status="new">Nieuwe Tips</button>
+                    <button class="filter-pill" data-status="interested">Geïnteresseerd</button>
+                    <button class="filter-pill" data-status="ignored">Genegeerd</button>
+                    <button class="filter-pill" data-status="all">Alles</button>
+                </div>
+                
+                <div class="loader-container" id="matches-loader" style="display: none;">
+                    <span class="loader"></span>
+                    <p>Concerten laden en scoren...</p>
+                </div>
+                
+                <div class="grid" id="matches-grid">
+                    <!-- Dynamic Concert Cards will be injected here -->
+                </div>
+                
+                <div class="panel" id="no-matches" style="display: none; text-align: center; padding: 50px;">
+                    <i class="fa-solid fa-calendar-xmark" style="font-size: 48px; color: var(--text-dark); margin-bottom: 20px;"></i>
+                    <h3>Geen concerten gevonden</h3>
+                    <p class="text-muted" style="margin-top: 8px;">Klik op 'Sync Feeds' of koppel Spotify via Instellingen om concerten te zoeken.</p>
+                </div>
+            </div>
+
+            <!-- TAB: VENUES -->
+            <div class="tab-content" id="tab-venues">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2>Geregistreerde Podia</h2>
+                        <button class="btn btn-primary btn-sm" id="btn-add-venue">
+                            <i class="fa-solid fa-plus"></i> Podium Toevoegen
+                        </button>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Naam</th>
+                                    <th>Categorie</th>
+                                    <th>Coördinaten</th>
+                                    <th>Website</th>
+                                    <th>Aliases (matching)</th>
+                                    <th style="text-align: right;">Acties</th>
+                                </tr>
+                            </thead>
+                            <tbody id="venues-table-body">
+                                <!-- Dynamic Venues List will be injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: GEMINI PARSER -->
+            <div class="tab-content" id="tab-parser">
+                <div class="panel">
+                    <h2>Nieuwsbrief Extraheren met Gemini</h2>
+                    <p class="text-muted" style="margin-bottom: 20px;">
+                        Heb je een e-mail of nieuwsbrief ontvangen van een poppodium? Plak de inhoud (tekst of HTML) hieronder. 
+                        Gemini Flash analyseert de tekst en haalt automatisch artiesten, data, zalen en ticketprijzen voor je op.
+                    </p>
+                    
+                    <div class="form-group">
+                        <label for="newsletter-text">Inhoud Nieuwsbrief / E-mail</label>
+                        <textarea id="newsletter-text" placeholder="Plak hier de tekst of HTML van de e-mail..."></textarea>
+                    </div>
+                    
+                    <button class="btn btn-primary" id="btn-parse-email">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Extraheren via Gemini
+                    </button>
+                </div>
+                
+                <div class="loader-container" id="parser-loader" style="display: none;">
+                    <span class="loader"></span>
+                    <p>Gemini is de nieuwsbrief aan het analyseren... Dit kan een paar seconden duren.</p>
+                </div>
+                
+                <div class="panel" id="parser-results" style="display: none;">
+                    <h3>Resultaten</h3>
+                    <p class="text-muted" id="parser-results-summary" style="margin-bottom: 15px;"></p>
+                    <div class="grid" id="parser-results-grid">
+                        <!-- Extracted concert cards will be displayed here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: SETTINGS -->
+            <div class="tab-content" id="tab-settings">
+                <!-- Spotify Setup -->
+                <div class="spotify-status-panel">
+                    <div class="spotify-status-left">
+                        <i class="fa-brands fa-spotify spotify-icon"></i>
+                        <div>
+                            <div class="spotify-title" id="spotify-conn-title">Spotify status laden...</div>
+                            <div class="spotify-desc" id="spotify-conn-desc">Muziekvoorkeuren ophalen</div>
+                        </div>
+                    </div>
+                    <div>
+                        <a href="/login/spotify" class="btn btn-success" id="btn-spotify-connect" style="display: none;">
+                            <i class="fa-brands fa-spotify"></i> Koppel Spotify
+                        </a>
+                        <button class="btn btn-secondary" id="btn-spotify-sync" style="display: none;">
+                            <i class="fa-solid fa-rotate"></i> Synchroniseer Smaak
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Geolocation & radii -->
+                <div class="panel">
+                    <h2>Mijn Thuislocatie & Radii</h2>
+                    <p class="text-muted" style="margin-bottom: 20px;">
+                        Bandplanner berekent de afstandsscore op basis van je thuislocatie. Geef hier de coördinaten van je thuisbasis op.
+                    </p>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="home-lat">Breedtegraad (Latitude)</label>
+                            <input type="number" id="home-lat" step="0.0001" value="52.0907">
+                        </div>
+                        <div class="form-group">
+                            <label for="home-lon">Lengtegraad (Longitude)</label>
+                            <input type="number" id="home-lon" step="0.0001" value="5.1214">
+                        </div>
+                    </div>
+                    
+                    <h3>Zoekstralen (Radius in kilometers)</h3>
+                    <p class="text-muted" style="margin-bottom: 15px;">Zalen buiten deze radius worden uitgesloten voor het betreffende zaaltype.</p>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="radius-small">Kleine Zalen (km)</label>
+                            <input type="number" id="radius-small" value="25">
+                        </div>
+                        <div class="form-group">
+                            <label for="radius-medium">Middelgrote Zalen (km)</label>
+                            <input type="number" id="radius-medium" value="60">
+                        </div>
+                        <div class="form-group">
+                            <label for="radius-large">Grote Zalen / Festivals (km)</label>
+                            <input type="number" id="radius-large" value="250">
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary" id="btn-save-config">
+                        <i class="fa-solid fa-save"></i> Instellingen Opslaan
+                    </button>
+                </div>
+
+                <!-- ICS Calendar Link -->
+                <div class="panel">
+                    <h2>iCalendar Kalenderfeed</h2>
+                    <p class="text-muted" style="margin-bottom: 10px;">
+                        Kopieer de onderstaande link en voeg deze toe aan je kalenderprogramma (zoals Google Calendar, Apple Agenda of Outlook). 
+                        Concerten die je markeert als 'Geïnteresseerd' worden automatisch in je agenda gezet!
+                    </p>
+                    
+                    <div class="copy-link-container">
+                        <input type="text" id="ics-feed-url" class="copy-link-input" readonly value="http://localhost:8000/feed.ics">
+                        <button class="btn btn-secondary btn-sm" id="btn-copy-ics">
+                            <i class="fa-solid fa-copy"></i> Kopieer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- MODAL: ADD/EDIT VENUE -->
+    <div class="modal" id="venue-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Podium Toevoegen</h3>
+                <span class="modal-close" id="btn-close-modal">&times;</span>
+            </div>
+            <form id="venue-form">
+                <input type="hidden" id="venue-id">
+                <div class="form-group">
+                    <label for="venue-form-name">Naam Podium</label>
+                    <input type="text" id="venue-form-name" required placeholder="Bijv. Paradiso">
+                </div>
+                <div class="form-group">
+                    <label for="venue-form-category">Categorie</label>
+                    <select id="venue-form-category" required>
+                        <option value="small">Klein (lokaal clubcircuit / toneelhallen)</option>
+                        <option value="medium">Middelgroot (regionale poppodia / theaters)</option>
+                        <option value="large">Groot (grote evenementenhallen / festivals)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="venue-form-lat">Breedtegraad (Lat)</label>
+                        <input type="number" id="venue-form-lat" step="0.000001" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="venue-form-lon">Lengtegraad (Lon)</label>
+                        <input type="number" id="venue-form-lon" step="0.000001" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="venue-form-url">Website URL (Optioneel)</label>
+                    <input type="text" id="venue-form-url" placeholder="https://www.voorbeeld.nl">
+                </div>
+                <div class="form-group">
+                    <label for="venue-form-aliases">Aliases (Komma-gescheiden alternatieve namen)</label>
+                    <input type="text" id="venue-form-aliases" placeholder="Bijv. Paradiso Amsterdam, Paradiso Grote Zaal">
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-venue">Annuleren</button>
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Script Entry -->
+    <script src="/app.js"></script>
+</body>
+</html>

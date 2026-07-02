@@ -101,8 +101,13 @@ def sync_spotify_preferences(db: Session) -> int:
             for idx, item in enumerate(items):
                 artist_id = item["id"]
                 name = item["name"]
-                popularity = item.get("popularity", 50)
-                genres = item.get("genres", [])
+                popularity = item.get("popularity") or 50
+                genres = item.get("genres") or []
+                
+                # Fallback naar MusicBrainz voor genres in Sandbox/Development mode
+                if not genres:
+                    from app.services.musicbrainz import get_artist_genres
+                    genres = get_artist_genres(name)
                 
                 # Bereken een positie-gebaseerde score binnen deze lijst
                 # Positie 1 krijgt max score, positie 50 krijgt min score

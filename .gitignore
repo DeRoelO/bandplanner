@@ -1,0 +1,10 @@
+data/
+.env
+__pycache__/
+*.db
+.pytest_cache/
+app/__pycache__/
+app/services/__pycache__/
+app/services/.pytest_cache/
+*.pyc
+*.pyo

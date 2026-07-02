@@ -37,8 +37,13 @@ def lookup_artist_on_spotify(db: Session, artist_name: str) -> Optional[ArtistPr
             item = items[0]
             spotify_id = item["id"]
             name = item["name"]
-            popularity = item.get("popularity", 0)
-            genres = item.get("genres", [])
+            popularity = item.get("popularity") or 50
+            genres = item.get("genres") or []
+            
+            # Fallback naar MusicBrainz voor genres in Sandbox/Development mode
+            if not genres:
+                from app.services.musicbrainz import get_artist_genres
+                genres = get_artist_genres(name)
             
             # Controleer of deze al bestaat onder een andere ID of naam
             existing = db.query(ArtistPreference).filter(ArtistPreference.spotify_id == spotify_id).first()

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.database import get_db, SessionLocal
-from app.models import Concert, Venue, UserConfig, ArtistPreference
+from app.models import Concert, Venue, UserConfig, ArtistPreference, CustomScraper
 from app.services.config_manager import load_user_config, save_user_config
 from app.services.spotify import get_spotify_oauth, sync_spotify_preferences
 from app.services.rss import parse_rss_feeds
@@ -39,6 +39,15 @@ async def background_sync_loop():
                     new_count += new_email_count
                 except Exception as email_err:
                     print(f"[Background Task] Fout bij ophalen e-mails: {email_err}")
+                
+                # 2b. Run custom scrapers
+                from app.services.scraper_manager import run_custom_scraper
+                scrapers = db.query(CustomScraper).filter(CustomScraper.enabled == True).all()
+                for scraper in scrapers:
+                    try:
+                        await asyncio.to_thread(run_custom_scraper, db, scraper)
+                    except Exception as scraper_err:
+                        print(f"[Background Task] Fout bij draaien scraper '{scraper.name}': {scraper_err}")
                 
                 # 3. Score nieuwe concerten
                 high_matches = await asyncio.to_thread(score_all_new_concerts, db)
@@ -210,6 +219,16 @@ class ConcertStatusUpdate(BaseModel):
 
 class EmailParseRequest(BaseModel):
     email_text: str
+
+class CustomScraperCreate(BaseModel):
+    name: str
+    url: str
+
+class CustomScraperUpdate(BaseModel):
+    name: str
+    url: str
+    python_code: Optional[str] = None
+    enabled: bool
 
 # --- API Routes ---
 # 1. Configuur Routes
@@ -403,6 +422,15 @@ def trigger_feed_sync(background_tasks: BackgroundTasks, db: Session = Depends(g
             except Exception as email_err:
                 print(f"Error fetching emails during manual sync: {email_err}")
                 
+            # Run custom scrapers
+            from app.services.scraper_manager import run_custom_scraper
+            scrapers = sync_db.query(CustomScraper).filter(CustomScraper.enabled == True).all()
+            for scraper in scrapers:
+                try:
+                    run_custom_scraper(sync_db, scraper)
+                except Exception as scraper_err:
+                    print(f"Error running scraper '{scraper.name}' during manual sync: {scraper_err}")
+                
             high_matches = score_all_new_concerts(sync_db)
             if high_matches:
                 to_notify = [c for c in high_matches if not c.notified]
@@ -547,6 +575,84 @@ def get_ics_feed(db: Session = Depends(get_db)):
         cal.add_component(event)
         
     return Response(content=cal.to_ical(), media_type="text/calendar")
+
+# 6. Custom Scrapers Routes
+@app.get("/api/scrapers")
+def get_scrapers(db: Session = Depends(get_db)):
+    return db.query(CustomScraper).all()
+
+@app.post("/api/scrapers")
+def create_scraper(data: CustomScraperCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    exists = db.query(CustomScraper).filter(CustomScraper.name == data.name).first()
+    if exists:
+        raise HTTPException(status_code=400, detail="Er bestaat al een scraper met deze naam.")
+        
+    scraper = CustomScraper(
+        name=data.name,
+        url=data.url,
+        enabled=True
+    )
+    db.add(scraper)
+    db.commit()
+    db.refresh(scraper)
+    
+    # Run de scraper één keer in de achtergrond om code te genereren en de eerste concerten op te halen
+    from app.services.scraper_manager import run_custom_scraper
+    def initial_run():
+        sync_db = SessionLocal()
+        try:
+            s = sync_db.query(CustomScraper).filter(CustomScraper.id == scraper.id).first()
+            if s:
+                run_custom_scraper(sync_db, s)
+        finally:
+            sync_db.close()
+            
+    background_tasks.add_task(initial_run)
+    return scraper
+
+@app.post("/api/scrapers/{scraper_id}/run")
+def trigger_scraper_run(scraper_id: int, background_tasks: BackgroundTasks, force_heal: bool = False, db: Session = Depends(get_db)):
+    scraper = db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
+    if not scraper:
+        raise HTTPException(status_code=404, detail="Scraper niet gevonden.")
+        
+    from app.services.scraper_manager import run_custom_scraper
+    def manual_run():
+        sync_db = SessionLocal()
+        try:
+            s = sync_db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
+            if s:
+                run_custom_scraper(sync_db, s, force_heal=force_heal)
+        finally:
+            sync_db.close()
+            
+    background_tasks.add_task(manual_run)
+    return {"status": "sync_triggered"}
+
+@app.put("/api/scrapers/{scraper_id}")
+def update_scraper(scraper_id: int, data: CustomScraperUpdate, db: Session = Depends(get_db)):
+    scraper = db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
+    if not scraper:
+        raise HTTPException(status_code=404, detail="Scraper niet gevonden.")
+        
+    scraper.name = data.name
+    scraper.url = data.url
+    scraper.python_code = data.python_code
+    scraper.enabled = data.enabled
+    
+    db.commit()
+    db.refresh(scraper)
+    return scraper
+
+@app.delete("/api/scrapers/{scraper_id}")
+def delete_scraper(scraper_id: int, db: Session = Depends(get_db)):
+    scraper = db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
+    if not scraper:
+        raise HTTPException(status_code=404, detail="Scraper niet gevonden.")
+        
+    db.delete(scraper)
+    db.commit()
+    return {"status": "success"}
 
 # Mount Static Files (voor frontend)
 static_dir = os.path.join(os.path.dirname(__file__), "static")

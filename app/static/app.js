@@ -81,6 +81,31 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnCloseModal = document.getElementById("btn-close-modal");
     const btnCancelVenue = document.getElementById("btn-cancel-venue");
 
+    // Scrapers Tab
+    const scrapersTableBody = document.getElementById("scrapers-table-body");
+    const btnAddScraper = document.getElementById("btn-add-scraper");
+    
+    // Scraper Modals
+    const modalScraper = document.getElementById("modal-scraper");
+    const scraperForm = document.getElementById("scraper-form");
+    const scraperFormName = document.getElementById("scraper-form-name");
+    const scraperFormUrl = document.getElementById("scraper-form-url");
+    const btnCloseScraperModal = document.getElementById("btn-close-scraper-modal");
+    const btnCancelScraper = document.getElementById("btn-cancel-scraper");
+    const btnSubmitScraper = document.getElementById("btn-submit-scraper");
+    
+    const modalScraperCode = document.getElementById("modal-scraper-code");
+    const scraperCodeForm = document.getElementById("scraper-code-form");
+    const scraperCodeTitle = document.getElementById("scraper-code-title");
+    const scraperCodeId = document.getElementById("scraper-code-id");
+    const scraperCodeName = document.getElementById("scraper-code-name");
+    const scraperCodeUrl = document.getElementById("scraper-code-url");
+    const scraperCodeEnabled = document.getElementById("scraper-code-enabled");
+    const scraperCodeTextarea = document.getElementById("scraper-code-textarea");
+    const btnCloseCodeModal = document.getElementById("btn-close-code-modal");
+    const btnCancelCode = document.getElementById("btn-cancel-code");
+    const btnHealScraperManual = document.getElementById("btn-heal-scraper-manual");
+
     // Dynamic ICS link setup
     icsFeedUrlInput.value = `${window.location.protocol}//${window.location.host}/feed.ics`;
 
@@ -128,6 +153,11 @@ document.addEventListener("DOMContentLoaded", () => {
             pageTitle.innerText = "Nieuwsbrief Parser";
             pageSubtitle.innerText = "Concertgegevens extraheren met Gemini AI";
             btnSyncFeeds.style.display = "none";
+        } else if (tabName === "scrapers") {
+            pageTitle.innerText = "Custom Scrapers";
+            pageSubtitle.innerText = "Zelf-herstellende BeautifulSoup scrapers voor podium websites";
+            btnSyncFeeds.style.display = "none";
+            loadScrapers();
         } else if (tabName === "settings") {
             pageTitle.innerText = "Instellingen";
             pageSubtitle.innerText = "Beheer je thuislocatie, zoekstralen en Spotify-koppeling";
@@ -651,6 +681,292 @@ document.addEventListener("DOMContentLoaded", () => {
             parserResultsGrid.appendChild(card);
         });
     }
+
+    // --- Scrapers Tab Functions ---
+    async function loadScrapers() {
+        try {
+            scrapersTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;"><span class="loader"></span><p>Scrapers laden...</p></td></tr>';
+            const res = await fetch("/api/scrapers");
+            const scrapers = await res.json();
+            scrapersTableBody.innerHTML = "";
+            
+            if (scrapers.length === 0) {
+                scrapersTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;" class="text-muted">Geen custom scrapers geconfigureerd. Voeg er een toe via de knop hierboven!</td></tr>';
+                return;
+            }
+            
+            scrapers.forEach(s => {
+                const tr = document.createElement("tr");
+                
+                // Status badge
+                let statusBadge = '<span class="status-pill status-new">Nooit gedraaid</span>';
+                if (s.last_status === "success") {
+                    statusBadge = '<span class="status-pill status-interested"><i class="fa-solid fa-check"></i> Succes</span>';
+                } else if (s.last_status === "failed") {
+                    statusBadge = '<span class="status-pill status-ignored"><i class="fa-solid fa-xmark"></i> Mislukt</span>';
+                }
+                
+                // Last run time
+                const lastRunTime = s.last_run ? new Date(s.last_run).toLocaleString("nl-NL") : "Nooit";
+                
+                // Toggle switch for Enabled
+                const enabledToggle = `
+                    <label class="switch" style="position: relative; display: inline-block; width: 40px; height: 20px; margin-right: 10px; vertical-align: middle;">
+                        <input type="checkbox" class="scraper-toggle-enabled" data-id="${s.id}" ${s.enabled ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${s.enabled ? '#6366f1' : '#ccc'}; transition: .4s; border-radius: 20px;"></span>
+                    </label>
+                `;
+                
+                // Error snippet
+                const errorSnippet = s.error_log ? `<div class="text-muted" style="max-width: 250px; font-family: monospace; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${s.error_log.replace(/"/g, '&quot;')}">${s.error_log}</div>` : "-";
+                
+                tr.innerHTML = `
+                    <td style="font-weight: 600; color: #ffffff;">${s.name}</td>
+                    <td><a href="${s.url}" target="_blank" class="text-muted" style="text-decoration: underline;">${s.url}</a></td>
+                    <td>${statusBadge}</td>
+                    <td class="text-muted">${lastRunTime}</td>
+                    <td>${errorSnippet}</td>
+                    <td style="text-align: right; white-space: nowrap;">
+                        ${enabledToggle}
+                        <button class="btn btn-secondary btn-sm btn-run-scraper" data-id="${s.id}" title="Nu draaien" style="margin-right: 5px; padding: 4px 8px;">
+                            <i class="fa-solid fa-play"></i> Run
+                        </button>
+                        <button class="btn btn-secondary btn-sm btn-view-code" data-id="${s.id}" data-name="${s.name}" data-url="${s.url}" data-code="${(s.python_code || '').replace(/"/g, '&quot;')}" data-enabled="${s.enabled}" title="Bekijk code" style="margin-right: 5px; padding: 4px 8px;">
+                            <i class="fa-solid fa-code"></i> Code
+                        </button>
+                        <button class="btn btn-secondary btn-sm btn-delete-scraper" data-id="${s.id}" title="Verwijderen" style="padding: 4px 8px; background-color: rgba(239, 68, 68, 0.15); color: #ef4444;">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                
+                scrapersTableBody.appendChild(tr);
+            });
+            
+            // Add listeners to table buttons
+            document.querySelectorAll(".scraper-toggle-enabled").forEach(chk => {
+                chk.addEventListener("change", async (e) => {
+                    const id = e.target.getAttribute("data-id");
+                    const enabled = e.target.checked;
+                    await toggleScraperEnabled(id, enabled);
+                });
+            });
+            
+            document.querySelectorAll(".btn-run-scraper").forEach(btn => {
+                btn.addEventListener("click", async (e) => {
+                    const btnEl = e.currentTarget;
+                    const id = btnEl.getAttribute("data-id");
+                    btnEl.disabled = true;
+                    btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running';
+                    await runScraperManual(id);
+                    btnEl.disabled = false;
+                    btnEl.innerHTML = '<i class="fa-solid fa-play"></i> Run';
+                });
+            });
+            
+            document.querySelectorAll(".btn-view-code").forEach(btn => {
+                btn.addEventListener("click", (e) => {
+                    const btnEl = e.currentTarget;
+                    const id = btnEl.getAttribute("data-id");
+                    const name = btnEl.getAttribute("data-name");
+                    const url = btnEl.getAttribute("data-url");
+                    const code = btnEl.getAttribute("data-code");
+                    const enabled = btnEl.getAttribute("data-enabled") === "true";
+                    
+                    scraperCodeId.value = id;
+                    scraperCodeName.value = name;
+                    scraperCodeUrl.value = url;
+                    scraperCodeEnabled.value = enabled;
+                    scraperCodeTitle.innerText = `Scraper Code: ${name}`;
+                    scraperCodeTextarea.value = code;
+                    
+                    modalScraperCode.style.display = "flex";
+                });
+            });
+            
+            document.querySelectorAll(".btn-delete-scraper").forEach(btn => {
+                btn.addEventListener("click", async (e) => {
+                    const id = e.currentTarget.getAttribute("data-id");
+                    if (confirm("Weet je zeker dat je deze scraper wilt verwijderen?")) {
+                        await deleteScraper(id);
+                    }
+                });
+            });
+            
+        } catch (err) {
+            console.error("Fout bij laden scrapers:", err);
+            scrapersTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">Fout bij inladen scrapers.</td></tr>';
+        }
+    }
+    
+    // Toggle Enabled
+    async function toggleScraperEnabled(id, enabled) {
+        try {
+            const getRes = await fetch(`/api/scrapers`);
+            const scrapers = await getRes.json();
+            const scraper = scrapers.find(s => s.id == id);
+            
+            if (scraper) {
+                const res = await fetch(`/api/scrapers/${id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name: scraper.name,
+                        url: scraper.url,
+                        python_code: scraper.python_code,
+                        enabled: enabled
+                    })
+                });
+                if (!res.ok) alert("Fout bij wijzigen status.");
+            }
+            loadScrapers();
+        } catch (err) {
+            console.error(err);
+        }
+    }
+    
+    // Run Scraper Manual
+    async function runScraperManual(id) {
+        try {
+            const res = await fetch(`/api/scrapers/${id}/run`, { method: "POST" });
+            if (res.ok) {
+                alert("Scraper handmatig gestart in de achtergrond! Vernieuw de pagina over een paar seconden om resultaten te bekijken.");
+                setTimeout(loadScrapers, 3000);
+            } else {
+                const data = await res.json();
+                alert("Fout bij starten scraper: " + data.detail);
+            }
+        } catch (err) {
+            alert("Netwerkfout: " + err.message);
+        }
+    }
+    
+    // Delete Scraper
+    async function deleteScraper(id) {
+        try {
+            const res = await fetch(`/api/scrapers/${id}`, { method: "DELETE" });
+            if (res.ok) {
+                loadScrapers();
+            } else {
+                alert("Fout bij verwijderen.");
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+    
+    // Scraper Modal Handlers
+    btnAddScraper.addEventListener("click", () => {
+        scraperForm.reset();
+        modalScraper.style.display = "flex";
+    });
+    
+    btnCloseScraperModal.addEventListener("click", () => {
+        modalScraper.style.display = "none";
+    });
+    btnCancelScraper.addEventListener("click", () => {
+        modalScraper.style.display = "none";
+    });
+    
+    scraperForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const payload = {
+            name: scraperFormName.value.trim(),
+            url: scraperFormUrl.value.trim()
+        };
+        
+        btnSubmitScraper.disabled = true;
+        btnSubmitScraper.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Opslaan...';
+        
+        try {
+            const res = await fetch("/api/scrapers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                modalScraper.style.display = "none";
+                alert("Scraper toegevoegd! Gemini genereert nu de scraping-code in de achtergrond.");
+                setTimeout(loadScrapers, 5000);
+            } else {
+                const data = await res.json();
+                alert("Fout bij toevoegen scraper: " + data.detail);
+            }
+        } catch (err) {
+            alert("Netwerkfout: " + err.message);
+        } finally {
+            btnSubmitScraper.disabled = false;
+            btnSubmitScraper.innerHTML = "Opslaan";
+        }
+    });
+    
+    // Code Modal Handlers
+    btnCloseCodeModal.addEventListener("click", () => {
+        modalScraperCode.style.display = "none";
+    });
+    btnCancelCode.addEventListener("click", () => {
+        modalScraperCode.style.display = "none";
+    });
+    
+    scraperCodeForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const id = scraperCodeId.value;
+        const payload = {
+            name: scraperCodeName.value,
+            url: scraperCodeUrl.value,
+            python_code: scraperCodeTextarea.value,
+            enabled: scraperCodeEnabled.value === "true"
+        };
+        
+        try {
+            const res = await fetch(`/api/scrapers/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                modalScraperCode.style.display = "none";
+                loadScrapers();
+            } else {
+                alert("Fout bij opslaan code.");
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    });
+    
+    // Manual healing handler
+    btnHealScraperManual.addEventListener("click", async () => {
+        const id = scraperCodeId.value;
+        btnHealScraperManual.disabled = true;
+        btnHealScraperManual.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Repareren...';
+        
+        try {
+            const res = await fetch(`/api/scrapers/${id}/run?force_heal=true`, { method: "POST" });
+            if (res.ok) {
+                alert("Gemini reparatie gestart in de achtergrond! De code wordt automatisch herladen zodra deze gereed is.");
+                setTimeout(async () => {
+                    const scrapersRes = await fetch("/api/scrapers");
+                    const scrapers = await scrapersRes.json();
+                    const s = scrapers.find(x => x.id == id);
+                    if (s) {
+                        scraperCodeTextarea.value = s.python_code || "";
+                    }
+                    btnHealScraperManual.disabled = false;
+                    btnHealScraperManual.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Forceer Gemini Reparatie';
+                    loadScrapers();
+                }, 8000);
+            } else {
+                alert("Fout bij starten reparatie.");
+                btnHealScraperManual.disabled = false;
+                btnHealScraperManual.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Forceer Gemini Reparatie';
+            }
+        } catch (err) {
+            alert(err.message);
+            btnHealScraperManual.disabled = false;
+            btnHealScraperManual.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Forceer Gemini Reparatie';
+        }
+    });
 
     // --- Clipboard Copy ICS ---
     btnCopyIcs.addEventListener("click", () => {

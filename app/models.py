@@ -85,3 +85,17 @@ class Concert(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     venue = relationship("Venue", back_populates="concerts")
+
+
+class CustomScraper(Base):
+    __tablename__ = "custom_scrapers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    url = Column(String, nullable=False)
+    python_code = Column(String, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    last_run = Column(DateTime, nullable=True)
+    last_status = Column(String, nullable=True)  # 'success', 'failed'
+    error_log = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

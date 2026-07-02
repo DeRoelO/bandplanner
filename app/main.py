@@ -38,7 +38,7 @@ async def background_sync_loop():
                 if high_matches:
                     to_notify = [c for c in high_matches if not c.notified]
                     if to_notify:
-                        success = notify_new_concerts(to_notify)
+                        success = notify_new_concerts(db, to_notify)
                         if success:
                             for c in to_notify:
                                 c.notified = True
@@ -47,7 +47,7 @@ async def background_sync_loop():
             except Exception as e:
                 print(f"[Background Task] Fout tijdens sync loop: {e}")
                 # Stuur een e-mail notificatie over de fout
-                notify_parser_error(f"Fout in automatische sync loop:\n{e}")
+                notify_parser_error(db, f"Fout in automatische sync loop:\n{e}")
             finally:
                 db.close()
         except asyncio.CancelledError:
@@ -57,6 +57,7 @@ async def background_sync_loop():
         # Elke 12 uur synchroniseren
         print("[Background Task] Volgende sync over 12 uur.")
         await asyncio.sleep(12 * 3600)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -106,6 +107,20 @@ class ConfigUpdate(BaseModel):
     radius_small: float
     radius_medium: float
     radius_large: float
+    
+    # Sleutels (instelbaar via GUI)
+    gemini_api_key: Optional[str] = ""
+    spotify_client_id: Optional[str] = ""
+    spotify_client_secret: Optional[str] = ""
+    spotify_redirect_uri: Optional[str] = "http://localhost:8080/callback"
+    
+    # SMTP (instelbaar via GUI)
+    smtp_server: Optional[str] = ""
+    smtp_port: Optional[int] = 587
+    smtp_username: Optional[str] = ""
+    smtp_password: Optional[str] = ""
+    smtp_from_email: Optional[str] = ""
+    smtp_to_email: Optional[str] = ""
 
 class VenueCreateUpdate(BaseModel):
     name: str
@@ -153,6 +168,20 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db)):
     config.radius_medium = data.radius_medium
     config.radius_large = data.radius_large
     
+    # Keys
+    config.gemini_api_key = data.gemini_api_key
+    config.spotify_client_id = data.spotify_client_id
+    config.spotify_client_secret = data.spotify_client_secret
+    config.spotify_redirect_uri = data.spotify_redirect_uri
+    
+    # SMTP
+    config.smtp_server = data.smtp_server
+    config.smtp_port = data.smtp_port
+    config.smtp_username = data.smtp_username
+    config.smtp_password = data.smtp_password
+    config.smtp_from_email = data.smtp_from_email
+    config.smtp_to_email = data.smtp_to_email
+    
     db.commit()
     db.refresh(config)
     
@@ -166,6 +195,9 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db)):
 @app.get("/api/spotify/status")
 def get_spotify_status(db: Session = Depends(get_db)):
     config = db.query(UserConfig).first()
+    
+    client_id = config.spotify_client_id if config and config.spotify_client_id else settings.SPOTIFY_CLIENT_ID
+    client_secret = config.spotify_client_secret if config and config.spotify_client_secret else settings.SPOTIFY_CLIENT_SECRET
     connected = config is not None and config.spotify_refresh_token is not None
     
     pref_count = db.query(ArtistPreference).filter(
@@ -176,28 +208,34 @@ def get_spotify_status(db: Session = Depends(get_db)):
         ArtistPreference.source == "genre_match"
     ).count()
     
+    db_redirect = config.spotify_redirect_uri if config and config.spotify_redirect_uri else settings.SPOTIFY_REDIRECT_URI
+    
     return {
         "connected": connected,
         "top_artists_count": pref_count,
         "cached_artists_count": genre_count,
-        "redirect_uri": settings.SPOTIFY_REDIRECT_URI,
-        "client_id_configured": bool(settings.SPOTIFY_CLIENT_ID)
+        "redirect_uri": db_redirect,
+        "client_id_configured": bool(client_id)
     }
 
 @app.get("/login/spotify")
-def login_spotify():
-    if not settings.SPOTIFY_CLIENT_ID or not settings.SPOTIFY_CLIENT_SECRET:
+def login_spotify(db: Session = Depends(get_db)):
+    config = db.query(UserConfig).first()
+    client_id = config.spotify_client_id if config and config.spotify_client_id else settings.SPOTIFY_CLIENT_ID
+    client_secret = config.spotify_client_secret if config and config.spotify_client_secret else settings.SPOTIFY_CLIENT_SECRET
+    
+    if not client_id or not client_secret:
         raise HTTPException(
             status_code=400, 
-            detail="Spotify Client ID en Secret zijn niet geconfigureerd in .env."
+            detail="Spotify Client ID en Secret zijn niet geconfigureerd in de database of .env."
         )
-    oauth = get_spotify_oauth()
+    oauth = get_spotify_oauth(db)
     auth_url = oauth.get_authorize_url()
     return RedirectResponse(url=auth_url)
 
 @app.get("/callback")
 def spotify_callback(code: str, db: Session = Depends(get_db)):
-    oauth = get_spotify_oauth()
+    oauth = get_spotify_oauth(db)
     try:
         token_info = oauth.get_access_token(code, as_dict=True)
         config = db.query(UserConfig).first()
@@ -269,6 +307,27 @@ def delete_venue(venue_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success"}
 
+# Helper om concerten inclusief podium-relatie te formatteren voor JSON output
+def format_concert(c: Concert):
+    return {
+        "id": c.id,
+        "artist": c.artist,
+        "date": c.date.isoformat() if c.date else None,
+        "ticket_sale_start": c.ticket_sale_start.isoformat() if c.ticket_sale_start else None,
+        "price": c.price,
+        "url": c.url,
+        "calculated_score": c.calculated_score,
+        "status": c.status,
+        "source": c.source,
+        "venue": {
+            "id": c.venue.id,
+            "name": c.venue.name,
+            "category": c.venue.category,
+            "latitude": c.venue.latitude,
+            "longitude": c.venue.longitude
+        } if c.venue else None
+    }
+
 # 4. Concerten Routes
 @app.get("/api/concerts")
 def get_concerts(status: Optional[str] = None, min_score: Optional[float] = None, db: Session = Depends(get_db)):
@@ -279,7 +338,8 @@ def get_concerts(status: Optional[str] = None, min_score: Optional[float] = None
         query = query.filter(Concert.calculated_score >= min_score)
         
     # Sorteren op score (hoogst eerst) en daarna datum (dichtstbijzijnde eerst)
-    return query.order_by(Concert.calculated_score.desc(), Concert.date.asc()).all()
+    concerts = query.order_by(Concert.calculated_score.desc(), Concert.date.asc()).all()
+    return [format_concert(c) for c in concerts]
 
 @app.post("/api/concerts/{concert_id}/status")
 def update_concert_status(concert_id: int, data: ConcertStatusUpdate, db: Session = Depends(get_db)):
@@ -290,7 +350,7 @@ def update_concert_status(concert_id: int, data: ConcertStatusUpdate, db: Sessio
     concert.status = data.status
     db.commit()
     db.refresh(concert)
-    return concert
+    return format_concert(concert)
 
 @app.post("/api/concerts/sync")
 def trigger_feed_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -303,7 +363,7 @@ def trigger_feed_sync(background_tasks: BackgroundTasks, db: Session = Depends(g
             if high_matches:
                 to_notify = [c for c in high_matches if not c.notified]
                 if to_notify:
-                    success = notify_new_concerts(to_notify)
+                    success = notify_new_concerts(sync_db, to_notify)
                     if success:
                         for c in to_notify:
                             c.notified = True
@@ -319,7 +379,7 @@ def trigger_feed_sync(background_tasks: BackgroundTasks, db: Session = Depends(g
 @app.post("/api/concerts/parse-email")
 def parse_email_newsletter(data: EmailParseRequest, db: Session = Depends(get_db)):
     try:
-        extracted = parse_newsletter_with_gemini(data.email_text)
+        extracted = parse_newsletter_with_gemini(db, data.email_text)
         
         user_config = db.query(UserConfig).first()
         if not user_config:
@@ -399,10 +459,11 @@ def parse_email_newsletter(data: EmailParseRequest, db: Session = Depends(get_db
             "status": "success",
             "extracted_count": len(extracted),
             "added_count": len(added_concerts),
-            "added_concerts": added_concerts
+            "added_concerts": [format_concert(c) for c in added_concerts]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fout bij verwerken nieuwsbrief: {e}")
+
 
 # 5. Dynamic iCalendar Feed (.ics)
 from icalendar import Calendar, Event

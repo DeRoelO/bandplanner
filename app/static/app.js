@@ -39,6 +39,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const radiusSmall = document.getElementById("radius-small");
     const radiusMedium = document.getElementById("radius-medium");
     const radiusLarge = document.getElementById("radius-large");
+    
+    // Sleutels & SMTP inputs
+    const geminiKey = document.getElementById("gemini-key");
+    const spotifyId = document.getElementById("spotify-id");
+    const spotifySecret = document.getElementById("spotify-secret");
+    const spotifyRedirect = document.getElementById("spotify-redirect");
+    const smtpServer = document.getElementById("smtp-server");
+    const smtpPort = document.getElementById("smtp-port");
+    const smtpUsername = document.getElementById("smtp-username");
+    const smtpPassword = document.getElementById("smtp-password");
+    const smtpFrom = document.getElementById("smtp-from");
+    const smtpTo = document.getElementById("smtp-to");
+    
     const btnSaveConfig = document.getElementById("btn-save-config");
     
     const spotifyConnTitle = document.getElementById("spotify-conn-title");
@@ -156,6 +169,20 @@ document.addEventListener("DOMContentLoaded", () => {
             radiusSmall.value = config.radius_small;
             radiusMedium.value = config.radius_medium;
             radiusLarge.value = config.radius_large;
+            
+            // Keys
+            geminiKey.value = config.gemini_api_key || "";
+            spotifyId.value = config.spotify_client_id || "";
+            spotifySecret.value = config.spotify_client_secret || "";
+            spotifyRedirect.value = config.spotify_redirect_uri || "http://localhost:8080/callback";
+            
+            // SMTP
+            smtpServer.value = config.smtp_server || "";
+            smtpPort.value = config.smtp_port || 587;
+            smtpUsername.value = config.smtp_username || "";
+            smtpPassword.value = config.smtp_password || "";
+            smtpFrom.value = config.smtp_from_email || "";
+            smtpTo.value = config.smtp_to_email || "";
         } catch (err) {
             console.error("Fout bij laden configuratie:", err);
         }
@@ -168,7 +195,21 @@ document.addEventListener("DOMContentLoaded", () => {
             home_longitude: parseFloat(homeLon.value),
             radius_small: parseFloat(radiusSmall.value),
             radius_medium: parseFloat(radiusMedium.value),
-            radius_large: parseFloat(radiusLarge.value)
+            radius_large: parseFloat(radiusLarge.value),
+            
+            // Keys
+            gemini_api_key: geminiKey.value.trim() || null,
+            spotify_client_id: spotifyId.value.trim() || null,
+            spotify_client_secret: spotifySecret.value.trim() || null,
+            spotify_redirect_uri: spotifyRedirect.value.trim() || "http://localhost:8080/callback",
+            
+            // SMTP
+            smtp_server: smtpServer.value.trim() || null,
+            smtp_port: parseInt(smtpPort.value) || 587,
+            smtp_username: smtpUsername.value.trim() || null,
+            smtp_password: smtpPassword.value || null,
+            smtp_from_email: smtpFrom.value.trim() || null,
+            smtp_to_email: smtpTo.value.trim() || null
         };
         
         try {
@@ -180,6 +221,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (res.ok) {
                 alert("Instellingen succesvol opgeslagen! Concert-scores worden opnieuw berekend.");
                 loadConfig();
+                loadSpotifyStatus(); // Spotify status herladen voor het geval ID/Secret zijn veranderd
             } else {
                 alert("Fout bij opslaan instellingen.");
             }
@@ -187,6 +229,7 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error(err);
         }
     });
+
 
     // Load Spotify Status
     async function loadSpotifyStatus() {

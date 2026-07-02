@@ -2,44 +2,54 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List
+from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import Concert
+from app.models import Concert, UserConfig
 
-def send_email_notification(subject: str, html_content: str) -> bool:
+def send_email_notification(db: Session, subject: str, html_content: str) -> bool:
     """
     Algemene helper om een HTML e-mail te sturen via SMTP.
-    Retourneert True als het succesvol was, anders False.
+    Gebruikt SMTP instellingen uit de DB of .env als fallback.
     """
-    if not all([settings.SMTP_SERVER, settings.SMTP_USERNAME, settings.SMTP_PASSWORD, settings.SMTP_TO_EMAIL]):
-        print("SMTP e-mailnotificaties zijn niet volledig geconfigureerd in .env. E-mail overgeslagen.")
+    user_config = db.query(UserConfig).first()
+    
+    server_addr = user_config.smtp_server if user_config and user_config.smtp_server else settings.SMTP_SERVER
+    port = user_config.smtp_port if user_config and user_config.smtp_port else settings.SMTP_PORT
+    username = user_config.smtp_username if user_config and user_config.smtp_username else settings.SMTP_USERNAME
+    password = user_config.smtp_password if user_config and user_config.smtp_password else settings.SMTP_PASSWORD
+    from_email = user_config.smtp_from_email if user_config and user_config.smtp_from_email else settings.SMTP_FROM_EMAIL
+    to_email = user_config.smtp_to_email if user_config and user_config.smtp_to_email else settings.SMTP_TO_EMAIL
+    
+    if not all([server_addr, username, password, to_email]):
+        print("SMTP e-mailnotificaties zijn niet volledig geconfigureerd in de database of .env. E-mail overgeslagen.")
         return False
         
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
-        msg['From'] = settings.SMTP_FROM_EMAIL or settings.SMTP_USERNAME
-        msg['To'] = settings.SMTP_TO_EMAIL
+        msg['From'] = from_email or username
+        msg['To'] = to_email
         
         # Voeg HTML content toe
         msg.attach(MIMEText(html_content, 'html'))
         
         # SMTP connectie maken
-        server = smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT)
+        server = smtplib.SMTP(server_addr, port)
         server.ehlo()
-        if settings.SMTP_PORT == 587:
+        if port == 587:
             server.starttls()
             server.ehlo()
             
-        server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        server.login(username, password)
         server.sendmail(msg['From'], [msg['To']], msg.as_string())
         server.close()
-        print(f"E-mail succesvol verzonden naar {settings.SMTP_TO_EMAIL} met onderwerp: '{subject}'")
+        print(f"E-mail succesvol verzonden naar {to_email} met onderwerp: '{subject}'")
         return True
     except Exception as e:
         print(f"Fout bij het verzenden van e-mail via SMTP: {e}")
         return False
 
-def notify_new_concerts(concerts: List[Concert]) -> bool:
+def notify_new_concerts(db: Session, concerts: List[Concert]) -> bool:
     """
     Stuurt een overzichtelijke e-mail met nieuw gevonden concert-tips.
     """
@@ -122,9 +132,9 @@ def notify_new_concerts(concerts: List[Concert]) -> bool:
     </html>
     """
     
-    return send_email_notification(subject, html_content)
+    return send_email_notification(db, subject, html_content)
 
-def notify_parser_error(error_message: str) -> bool:
+def notify_parser_error(db: Session, error_message: str) -> bool:
     """
     Stuurt een waarschuwingsmail als er een parser of synchronisatie faalt.
     """
@@ -146,4 +156,5 @@ def notify_parser_error(error_message: str) -> bool:
     </html>
     """
     
-    return send_email_notification(subject, html_content)
+    return send_email_notification(db, subject, html_content)
+

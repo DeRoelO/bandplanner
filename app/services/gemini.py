@@ -2,7 +2,9 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
+from sqlalchemy.orm import Session
 from app.config import settings
+from app.models import UserConfig
 
 class ExtractedConcert(BaseModel):
     artist: str = Field(description="De naam van de artiest, band of act.")
@@ -15,14 +17,17 @@ class ExtractedConcert(BaseModel):
 class ExtractedConcertList(BaseModel):
     concerts: List[ExtractedConcert] = Field(description="Een lijst met alle concerten die in de tekst zijn gevonden.")
 
-def parse_newsletter_with_gemini(text_content: str) -> List[ExtractedConcert]:
+def parse_newsletter_with_gemini(db: Session, text_content: str) -> List[ExtractedConcert]:
     """
     Stuurt de tekst van een nieuwsbrief naar Gemini om concerten en ticketinformatie te extraheren.
     """
-    if not settings.GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY is niet ingesteld in de configuratie.")
+    user_config = db.query(UserConfig).first()
+    api_key = user_config.gemini_api_key if user_config and user_config.gemini_api_key else settings.GEMINI_API_KEY
+    
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is niet ingesteld in de database of .env.")
 
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    client = genai.Client(api_key=api_key)
     
     prompt = f"""
     Analyseer de onderstaande nieuwsbrief of e-mailtekst van een poppodium of festival.
@@ -47,13 +52,10 @@ def parse_newsletter_with_gemini(text_content: str) -> List[ExtractedConcert]:
         )
     )
     
-    # Het antwoord is direct geparst door het SDK als we response_schema gebruiken
-    # via response.parsed
     try:
         if response.parsed:
             return response.parsed.concerts
         else:
-            # Fallback als parsed niet gevuld is
             import json
             data = json.loads(response.text)
             parsed_list = ExtractedConcertList(**data)
@@ -62,3 +64,4 @@ def parse_newsletter_with_gemini(text_content: str) -> List[ExtractedConcert]:
         print(f"Fout bij het parsen van Gemini respons: {e}")
         print(f"Ruwe respons: {response.text}")
         return []
+

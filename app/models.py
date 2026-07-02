@@ -18,6 +18,21 @@ class UserConfig(Base):
     spotify_access_token = Column(String, nullable=True)
     spotify_token_expires_at = Column(Integer, nullable=True)
 
+    # API Sleutels & Credentials (instelbaar via GUI)
+    gemini_api_key = Column(String, nullable=True)
+    spotify_client_id = Column(String, nullable=True)
+    spotify_client_secret = Column(String, nullable=True)
+    spotify_redirect_uri = Column(String, nullable=True, default="http://localhost:8080/callback")
+    
+    # SMTP Config (instelbaar via GUI)
+    smtp_server = Column(String, nullable=True)
+    smtp_port = Column(Integer, nullable=True, default=587)
+    smtp_username = Column(String, nullable=True)
+    smtp_password = Column(String, nullable=True)
+    smtp_from_email = Column(String, nullable=True)
+    smtp_to_email = Column(String, nullable=True)
+
+
 class Venue(Base):
     __tablename__ = "venues"
 

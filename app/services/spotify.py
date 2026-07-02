@@ -6,14 +6,25 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import ArtistPreference, UserConfig
 
-def get_spotify_oauth(redirect_uri: str = None) -> SpotifyOAuth:
+def get_spotify_oauth(db: Session, redirect_uri: str = None) -> SpotifyOAuth:
     """
-    Creëert de SpotifyOAuth manager op basis van instellingen.
+    Creëert de SpotifyOAuth manager op basis van instellingen in de DB of .env.
     """
+    user_config = db.query(UserConfig).first()
+    client_id = user_config.spotify_client_id if user_config and user_config.spotify_client_id else settings.SPOTIFY_CLIENT_ID
+    client_secret = user_config.spotify_client_secret if user_config and user_config.spotify_client_secret else settings.SPOTIFY_CLIENT_SECRET
+    
+    # Gebruik specifieke redirect_uri, of die uit DB, of als fallback uit config
+    db_redirect = user_config.spotify_redirect_uri if user_config and user_config.spotify_redirect_uri else settings.SPOTIFY_REDIRECT_URI
+    final_redirect = redirect_uri or db_redirect
+    
+    if not client_id or not client_secret:
+        raise ValueError("Spotify Client ID en Secret zijn niet geconfigureerd in de database of .env.")
+
     return SpotifyOAuth(
-        client_id=settings.SPOTIFY_CLIENT_ID,
-        client_secret=settings.SPOTIFY_CLIENT_SECRET,
-        redirect_uri=redirect_uri or settings.SPOTIFY_REDIRECT_URI,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=final_redirect,
         scope="user-top-read"
     )
 
@@ -31,7 +42,7 @@ def refresh_spotify_token(db: Session, user_config: UserConfig) -> str:
     if not user_config.spotify_refresh_token:
         raise ValueError("Geen Spotify refresh token beschikbaar. Koppel eerst je Spotify account.")
         
-    oauth = get_spotify_oauth()
+    oauth = get_spotify_oauth(db)
     
     # Controleer of het token is verlopen of bijna is verlopen (binnen 60 seconden)
     now = int(time.time())
@@ -48,6 +59,7 @@ def refresh_spotify_token(db: Session, user_config: UserConfig) -> str:
     
     db.commit()
     return user_config.spotify_access_token
+
 
 def sync_spotify_preferences(db: Session) -> int:
     """

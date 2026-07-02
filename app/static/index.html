@@ -202,10 +202,79 @@
                         </div>
                     </div>
                     
-                    <button class="btn btn-primary" id="btn-save-config">
-                        <i class="fa-solid fa-save"></i> Instellingen Opslaan
+                </div>
+
+                <!-- API Sleutels -->
+                <div class="panel">
+                    <h2>API Sleutels & Integraties</h2>
+                    <p class="text-muted" style="margin-bottom: 20px;">
+                        Configureer hier je API credentials voor externe koppelingen. Als je deze leeg laat, wordt er teruggevallen op het .env bestand.
+                    </p>
+                    <div class="form-group">
+                        <label for="gemini-key">Gemini API Key</label>
+                        <input type="password" id="gemini-key" placeholder="AI Studio Gemini API Sleutel">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="spotify-id">Spotify Client ID</label>
+                            <input type="text" id="spotify-id" placeholder="Spotify Developer Client ID">
+                        </div>
+                        <div class="form-group">
+                            <label for="spotify-secret">Spotify Client Secret</label>
+                            <input type="password" id="spotify-secret" placeholder="Spotify Developer Client Secret">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="spotify-redirect">Spotify Redirect URI</label>
+                        <input type="text" id="spotify-redirect" value="http://localhost:8080/callback">
+                    </div>
+                </div>
+
+                <!-- SMTP E-mailinstellingen -->
+                <div class="panel">
+                    <h2>E-mail Notificaties (SMTP)</h2>
+                    <p class="text-muted" style="margin-bottom: 20px;">
+                        Configureer de SMTP server om e-mailnotificaties te ontvangen bij nieuwe concerttips.
+                    </p>
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label for="smtp-server">SMTP Server</label>
+                            <input type="text" id="smtp-server" placeholder="Bijv. smtp.gmail.com">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="smtp-port">SMTP Poort</label>
+                            <input type="number" id="smtp-port" value="587">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="smtp-username">SMTP Gebruikersnaam (Email)</label>
+                            <input type="text" id="smtp-username" placeholder="gebruikersnaam@gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtp-password">SMTP Wachtwoord / App Wachtwoord</label>
+                            <input type="password" id="smtp-password" placeholder="Wachtwoord">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="smtp-from">Verzender E-mail (From)</label>
+                            <input type="text" id="smtp-from" placeholder="afzender@domein.nl">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtp-to">Ontvanger E-mail (To)</label>
+                            <input type="text" id="smtp-to" placeholder="ontvanger@domein.nl">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Opslaan Knop -->
+                <div style="margin-bottom: 30px; display: flex; justify-content: flex-end;">
+                    <button class="btn btn-primary" id="btn-save-config" style="padding: 14px 28px; font-size: 16px;">
+                        <i class="fa-solid fa-save"></i> Alle Instellingen Opslaan
                     </button>
                 </div>
+
 
                 <!-- ICS Calendar Link -->
                 <div class="panel">

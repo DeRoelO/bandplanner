@@ -44,15 +44,13 @@ def execute_scraper_code(code: str, html: str) -> List[Dict[str, Any]]:
         "print": print,
     }
     
-    sandbox_locals = {}
-    
     # Uitvoeren van het script
-    exec(compiled_code, sandbox_globals, sandbox_locals)
+    exec(compiled_code, sandbox_globals, sandbox_globals)
     
-    if "scrape" not in sandbox_locals:
+    if "scrape" not in sandbox_globals:
         raise ValueError("Het script definieert geen 'scrape(html)' functie.")
         
-    results = sandbox_locals["scrape"](html)
+    results = sandbox_globals["scrape"](html)
     
     if not isinstance(results, list):
         raise ValueError(f"De 'scrape' functie gaf een {type(results)} in plaats van een list.")

@@ -30,24 +30,24 @@ async def background_sync_loop():
             db = SessionLocal()
             try:
                 # 1. Sync RSS feeds
-                new_count = parse_rss_feeds(db)
+                new_count = await asyncio.to_thread(parse_rss_feeds, db)
                 
                 # 2. Sync IMAP email newsletters
                 from app.services.email_receiver import fetch_and_parse_emails
                 try:
-                    new_email_count = fetch_and_parse_emails(db)
+                    new_email_count = await asyncio.to_thread(fetch_and_parse_emails, db)
                     new_count += new_email_count
                 except Exception as email_err:
                     print(f"[Background Task] Fout bij ophalen e-mails: {email_err}")
                 
                 # 3. Score nieuwe concerten
-                high_matches = score_all_new_concerts(db)
+                high_matches = await asyncio.to_thread(score_all_new_concerts, db)
                 
                 # 4. Verstuur e-mails voor nieuwe aanbevelingen
                 if high_matches:
                     to_notify = [c for c in high_matches if not c.notified]
                     if to_notify:
-                        success = notify_new_concerts(db, to_notify)
+                        success = await asyncio.to_thread(notify_new_concerts, db, to_notify)
                         if success:
                             for c in to_notify:
                                 c.notified = True

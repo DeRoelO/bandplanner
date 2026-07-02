@@ -17,6 +17,47 @@ class ExtractedConcert(BaseModel):
 class ExtractedConcertList(BaseModel):
     concerts: List[ExtractedConcert] = Field(description="Een lijst met alle concerten die in de tekst zijn gevonden.")
 
+extracted_concerts_schema = {
+    "type": "OBJECT",
+    "properties": {
+        "concerts": {
+            "type": "ARRAY",
+            "description": "Een lijst met alle concerten die in de tekst zijn gevonden.",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "artist": {
+                        "type": "STRING", 
+                        "description": "De naam van de artiest, band of act."
+                    },
+                    "date": {
+                        "type": "STRING", 
+                        "description": "De datum van het concert in ISO 8601 formaat (YYYY-MM-DD). Als er ook een tijd bekend is, gebruik dan YYYY-MM-DDTHH:MM:SS."
+                    },
+                    "venue": {
+                        "type": "STRING", 
+                        "description": "De naam van de locatie of het poppodium."
+                    },
+                    "ticket_sale_start": {
+                        "type": "STRING", 
+                        "description": "De datum/tijd waarop de kaartverkoop start in ISO 8601 formaat (indien vermeld)."
+                    },
+                    "price": {
+                        "type": "NUMBER", 
+                        "description": "De prijs van een ticket in Euro's (alleen getal, bijv. 29.50) (indien vermeld)."
+                    },
+                    "url": {
+                        "type": "STRING", 
+                        "description": "De URL voor tickets of meer info (indien vermeld)."
+                    }
+                },
+                "required": ["artist", "date", "venue"]
+            }
+        }
+    },
+    "required": ["concerts"]
+}
+
 def parse_newsletter_with_gemini(db: Session, text_content: str) -> List[ExtractedConcert]:
     """
     Stuurt de tekst van een nieuwsbrief naar Gemini om concerten en ticketinformatie te extraheren.
@@ -47,21 +88,28 @@ def parse_newsletter_with_gemini(db: Session, text_content: str) -> List[Extract
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=ExtractedConcertList,
+            response_schema=extracted_concerts_schema,
             temperature=0.1
         )
     )
     
     try:
-        if response.parsed:
-            return response.parsed.concerts
-        else:
-            import json
-            data = json.loads(response.text)
-            parsed_list = ExtractedConcertList(**data)
-            return parsed_list.concerts
+        import json
+        data = json.loads(response.text)
+        extracted_concerts = []
+        for c in data.get("concerts", []):
+            extracted_concerts.append(ExtractedConcert(
+                artist=c.get("artist", ""),
+                date=c.get("date", ""),
+                venue=c.get("venue", ""),
+                ticket_sale_start=c.get("ticket_sale_start"),
+                price=c.get("price"),
+                url=c.get("url")
+            ))
+        return extracted_concerts
     except Exception as e:
         print(f"Fout bij het parsen van Gemini respons: {e}")
         print(f"Ruwe respons: {response.text}")
         return []
+
 

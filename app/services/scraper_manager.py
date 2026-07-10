@@ -14,6 +14,7 @@ from app.models import Concert, Venue, ArtistPreference
 from app.services.config_manager import load_user_config
 from app.services.rss import find_or_create_venue
 from app.services.scoring import score_concert
+from app.services.discovery import HEADERS
 from app.services import discovery
 
 # ─── Gemini helpers ───────────────────────────────────────────────────────────
@@ -22,9 +23,21 @@ def clean_html_for_gemini(html_content: str) -> str:
     if not html_content:
         return ""
     soup = BeautifulSoup(html_content, "html.parser")
-    for tag in soup(["script", "style", "head", "meta", "footer", "nav", "svg", "noscript"]):
+    # Verwijder absoluut irrelevante tags om tokens te besparen en ruis te verminderen
+    for tag in soup(["script", "style", "head", "meta", "footer", "nav", "svg", "noscript", "iframe", "header"]):
         tag.decompose()
-    return str(soup)[:15000]
+        
+    # Probeer de main agenda container te selecteren
+    main_content = None
+    for selector in ["main", "#content", "#agenda", ".agenda", "#programma", ".programma", ".events-grid", ".event-list", ".productions", "article"]:
+        found = soup.select_one(selector)
+        if found:
+            main_content = found
+            break
+            
+    content_soup = main_content if main_content else soup
+    # Neem tot 60.000 tekens. Flash Lite kan makkelijk 1M tokens aan, 60k is zeer klein maar voorkomt truncation.
+    return str(content_soup)[:60000]
 
 
 def execute_scraper_code(code: str, html: str) -> List[Dict[str, Any]]:
@@ -171,9 +184,12 @@ def heal_scraper_code(venue: Venue, html: str, error_msg: str) -> str:
 
 STRATEGY_LABELS = {
     "jsonld": "JSON-LD",
+    "playwright_jsonld": "Playwright + JSON-LD",
     "wordpress": "WordPress API",
     "embedded_json": "Embedded JSON",
+    "playwright_embedded_json": "Playwright + Embedded JSON",
     "html_gemini": "HTML + Gemini",
+    "playwright_gemini": "Playwright + Gemini",
 }
 
 
@@ -351,8 +367,10 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
 
     # ── Stap C: html_gemini fallback ──────────────────────────────────────
     try:
-        resp = requests.get(venue.scraper_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        resp = requests.get(venue.scraper_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
+        if resp.encoding == 'ISO-8859-1':
+            resp.encoding = resp.apparent_encoding
         html = resp.text
     except Exception as e:
         error_msg = f"Fout bij ophalen van website: {e}"

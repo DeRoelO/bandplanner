@@ -27,8 +27,16 @@ from bs4 import BeautifulSoup
 
 # ─── Constanten ──────────────────────────────────────────────────────────────
 
-USER_AGENT = "BandplannerBot/2.0 (contact: github.com/DeRoelO/bandplanner)"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 TIMEOUT = 15
+
+HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Cache-Control": "max-age=0",
+    "Connection": "keep-alive"
+}
 
 EVENT_KEYS = {
     "title", "name", "date", "startdate", "start_date", "startDate",
@@ -70,15 +78,22 @@ GARBAGE_ARTIST_WORDS = {
 
 def fetch_html(url: str) -> tuple[str, dict]:
     """Haalt HTML op en retourneert (html, headers)."""
-    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
+    resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
     resp.raise_for_status()
+    # Corrigeer encoding indien requests de verkeerde aanname doet
+    if resp.encoding == 'ISO-8859-1':
+        resp.encoding = resp.apparent_encoding
     return resp.text, dict(resp.headers)
+
+
 
 
 def fetch_json(url: str) -> dict | list | None:
     """Haalt JSON op van een URL."""
     try:
-        resp = requests.get(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}, timeout=TIMEOUT)
+        json_headers = HEADERS.copy()
+        json_headers["Accept"] = "application/json"
+        resp = requests.get(url, headers=json_headers, timeout=TIMEOUT)
         if resp.status_code == 200 and "json" in resp.headers.get("content-type", ""):
             return resp.json()
     except Exception:
@@ -89,13 +104,18 @@ def fetch_json(url: str) -> dict | list | None:
 def parse_date_str(s: str) -> Optional[str]:
     """
     Probeert een datumstring te parsen naar YYYY-MM-DD.
-    Ondersteunt ISO-formaten en Nederlandse datums.
+    Ondersteunt ISO-formaten, SQL datetimes en Nederlandse datums.
     """
     if not s:
         return None
     s = s.strip()
 
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+    # Als de string al begint met YYYY-MM-DD (zoals 2026-08-29 of 2026-08-29 23:30:00)
+    # kunnen we direct de eerste 10 tekens pakken! Dit is extreem robuust.
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        return s[:10]
+
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
             return datetime.strptime(s[:19], fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -363,33 +383,71 @@ def extract_wordpress_events(endpoint: str, venue_name: str) -> list[dict]:
         if not isinstance(item, dict):
             continue
 
+        # 1. Titel / artiest
         artist = None
-        title_field = item.get("title")
-        if isinstance(title_field, dict):
-            artist = title_field.get("rendered", "")
-        elif isinstance(title_field, str):
-            artist = title_field
+        
+        # Check custom object structures first
+        prod = item.get("prod")
+        if isinstance(prod, dict):
+            artist = prod.get("title")
+            
+        event_obj = item.get("event")
+        if not artist and isinstance(event_obj, dict):
+            artist = event_obj.get("title") or event_obj.get("name")
+            
+        if not artist:
+            title_field = item.get("title")
+            if isinstance(title_field, dict):
+                artist = title_field.get("rendered", "")
+            elif isinstance(title_field, str):
+                artist = title_field
+                
         if not artist:
             artist = item.get("name") or item.get("post_title") or ""
 
-        raw_date = (
-            item.get("acf", {}).get("date")
-            or item.get("acf", {}).get("event_date")
-            or item.get("acf", {}).get("start_date")
-            or item.get("meta", {}).get("event_date")
-            or item.get("date")
-            or item.get("start_date")
-        )
+        # 2. Datum
+        raw_date = None
+        if isinstance(event_obj, dict):
+            # event.start of event.start_date (Mezz gebruikt bijv. 'start' of 'start_date')
+            raw_date = event_obj.get("start") or event_obj.get("start_date") or event_obj.get("date")
+            
+        acf = item.get("acf")
+        if not raw_date and isinstance(acf, dict):
+            raw_date = acf.get("date") or acf.get("event_date") or acf.get("start_date") or acf.get("date_time")
+            
+        meta = item.get("meta")
+        if not raw_date and isinstance(meta, dict):
+            raw_date = meta.get("event_date")
+            
+        if not raw_date:
+            raw_date = item.get("date") or item.get("start_date")
+            
         date_str = parse_date_str(str(raw_date)) if raw_date else None
 
-        url = item.get("link") or item.get("url")
+        # 3. URL
+        url = None
+        if isinstance(prod, dict):
+            url = prod.get("link") or prod.get("url")
+        if not url and isinstance(event_obj, dict):
+            url = event_obj.get("ticket_url_iframe") or event_obj.get("link") or event_obj.get("url")
+        if not url:
+            url = item.get("link") or item.get("url")
+
+        # 4. Prijs
+        price = None
+        if isinstance(acf, dict):
+            price_raw = acf.get("price")
+            try:
+                price = float(price_raw) if price_raw is not None else None
+            except (ValueError, TypeError):
+                pass
 
         if artist and date_str and not is_garbage_artist(artist):
             events.append({
                 "artist": artist.strip(),
                 "date": date_str,
                 "venue": venue_name,
-                "price": None,
+                "price": price,
                 "url": url,
             })
 
@@ -597,6 +655,7 @@ def discover_best_strategy(venue_name: str, url: str) -> dict:
                 }
     except Exception as e:
         print(f"[Discovery] Embedded JSON fout: {e}")
+
 
     # ── Fallback: Gemini HTML parser ──────────────────────────────────────
     print(f"[Discovery] Geen gestructureerde bron gevonden. Fallback naar Gemini HTML parser.")

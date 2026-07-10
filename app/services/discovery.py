@@ -457,83 +457,94 @@ def find_wordpress_event_endpoint(api_index_url: str) -> Optional[str]:
 
 
 def extract_wordpress_events(endpoint: str, venue_name: str) -> list[dict]:
-    """Haalt events op van een WordPress REST endpoint en normaliseert ze."""
-    data = fetch_json(endpoint)
-    if not data or not isinstance(data, list):
-        return []
-
+    """Haalt events op van een WordPress REST endpoint en normaliseert ze met paginering."""
     events = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
+    separator = "&" if "?" in endpoint else "?"
+    page = 1
+    max_pages = 5  # Maximaal 500 events ophalen om loops te voorkomen
 
-        # 1. Titel / artiest
-        artist = None
-        
-        # Check custom object structures first
-        prod = item.get("prod")
-        if isinstance(prod, dict):
-            artist = prod.get("title")
+    while page <= max_pages:
+        paginated_endpoint = f"{endpoint}{separator}per_page=100&page={page}"
+        data = fetch_json(paginated_endpoint)
+        if not data or not isinstance(data, list):
+            break
+
+        page_events_count = 0
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            # 1. Titel / artiest
+            artist = None
             
-        event_obj = item.get("event")
-        if not artist and isinstance(event_obj, dict):
-            artist = event_obj.get("title") or event_obj.get("name")
-            
-        if not artist:
-            title_field = item.get("title")
-            if isinstance(title_field, dict):
-                artist = title_field.get("rendered", "")
-            elif isinstance(title_field, str):
-                artist = title_field
+            # Check custom object structures first
+            prod = item.get("prod")
+            if isinstance(prod, dict):
+                artist = prod.get("title")
                 
-        if not artist:
-            artist = item.get("name") or item.get("post_title") or ""
+            event_obj = item.get("event")
+            if not artist and isinstance(event_obj, dict):
+                artist = event_obj.get("title") or event_obj.get("name")
+                
+            if not artist:
+                title_field = item.get("title")
+                if isinstance(title_field, dict):
+                    artist = title_field.get("rendered", "")
+                elif isinstance(title_field, str):
+                    artist = title_field
+                    
+            if not artist:
+                artist = item.get("name") or item.get("post_title") or ""
 
-        # 2. Datum
-        raw_date = None
-        if isinstance(event_obj, dict):
-            # event.start of event.start_date (Mezz gebruikt bijv. 'start' of 'start_date')
-            raw_date = event_obj.get("start") or event_obj.get("start_date") or event_obj.get("date")
-            
-        acf = item.get("acf")
-        if not raw_date and isinstance(acf, dict):
-            raw_date = acf.get("date") or acf.get("event_date") or acf.get("start_date") or acf.get("date_time")
-            
-        meta = item.get("meta")
-        if not raw_date and isinstance(meta, dict):
-            raw_date = meta.get("event_date")
-            
-        if not raw_date:
-            raw_date = item.get("date") or item.get("start_date")
-            
-        date_str = parse_date_str(str(raw_date)) if raw_date else None
+            # 2. Datum
+            raw_date = None
+            if isinstance(event_obj, dict):
+                raw_date = event_obj.get("start") or event_obj.get("start_date") or event_obj.get("date")
+                
+            acf = item.get("acf")
+            if not raw_date and isinstance(acf, dict):
+                raw_date = acf.get("date") or acf.get("event_date") or acf.get("start_date") or acf.get("date_time")
+                
+            meta = item.get("meta")
+            if not raw_date and isinstance(meta, dict):
+                raw_date = meta.get("event_date")
+                
+            if not raw_date:
+                raw_date = item.get("date") or item.get("start_date")
+                
+            date_str = parse_date_str(str(raw_date)) if raw_date else None
 
-        # 3. URL
-        url = None
-        if isinstance(prod, dict):
-            url = prod.get("link") or prod.get("url")
-        if not url and isinstance(event_obj, dict):
-            url = event_obj.get("ticket_url_iframe") or event_obj.get("link") or event_obj.get("url")
-        if not url:
-            url = item.get("link") or item.get("url")
+            # 3. URL
+            url = None
+            if isinstance(prod, dict):
+                url = prod.get("link") or prod.get("url")
+            if not url and isinstance(event_obj, dict):
+                url = event_obj.get("ticket_url_iframe") or event_obj.get("link") or event_obj.get("url")
+            if not url:
+                url = item.get("link") or item.get("url")
 
-        # 4. Prijs
-        price = None
-        if isinstance(acf, dict):
-            price_raw = acf.get("price")
-            try:
-                price = float(price_raw) if price_raw is not None else None
-            except (ValueError, TypeError):
-                pass
+            # 4. Prijs
+            price = None
+            if isinstance(acf, dict):
+                price_raw = acf.get("price")
+                try:
+                    price = float(price_raw) if price_raw is not None else None
+                except (ValueError, TypeError):
+                    pass
 
-        if artist and date_str and not is_garbage_artist(artist):
-            events.append({
-                "artist": artist.strip(),
-                "date": date_str,
-                "venue": venue_name,
-                "price": price,
-                "url": url,
-            })
+            if artist and date_str and not is_garbage_artist(artist):
+                events.append({
+                    "artist": artist.strip(),
+                    "date": date_str,
+                    "venue": venue_name,
+                    "price": price,
+                    "url": url,
+                })
+                page_events_count += 1
+
+        if len(data) < 100:
+            break
+        page += 1
 
     return events
 

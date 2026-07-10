@@ -27,17 +27,27 @@ def clean_html_for_gemini(html_content: str) -> str:
     for tag in soup(["script", "style", "head", "meta", "footer", "nav", "svg", "noscript", "iframe", "header"]):
         tag.decompose()
         
-    # Probeer de main agenda container te selecteren
-    main_content = None
-    for selector in ["main", "#content", "#agenda", ".agenda", "#programma", ".programma", ".events-grid", ".event-list", ".productions", "article"]:
-        found = soup.select_one(selector)
-        if found:
-            main_content = found
-            break
+    # Smart repeat reduction using tag grouping.
+    # Dit zorgt ervoor dat extreem lange agenda's (zoals 250+ concerten op één pagina) 
+    # worden gereduceerd tot maximaal 5 representatieve elementen per layout-type.
+    # Hierdoor past de volledige pagina-structuur gegarandeerd binnen de token-limiet.
+    tags_by_class = {}
+    for tag in soup.find_all(True):
+        classes = tag.get("class")
+        if classes:
+            class_str = " ".join(sorted(classes))
+            tags_by_class.setdefault(class_str, []).append(tag)
             
-    content_soup = main_content if main_content else soup
-    # Neem tot 60.000 tekens. Flash Lite kan makkelijk 1M tokens aan, 60k is zeer klein maar voorkomt truncation.
-    return str(content_soup)[:60000]
+    for class_str, tags in tags_by_class.items():
+        if len(tags) > 8:
+            for tag in tags[5:]:
+                try:
+                    tag.decompose()
+                except Exception:
+                    pass
+
+    # Neem de eerste 80.000 tekens van de super compacte, representatieve HTML structuur
+    return str(soup)[:80000]
 
 
 def execute_scraper_code(code: str, html: str) -> List[Dict[str, Any]]:

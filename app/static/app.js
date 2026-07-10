@@ -436,7 +436,11 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const res = await fetch(`/api/venues/${id}`, { method: "DELETE" });
             if (res.ok) {
-                loadVenues();
+                if (activeTab === "venues") {
+                    loadVenues();
+                } else if (activeTab === "scrapers") {
+                    loadScrapers();
+                }
             } else {
                 alert("Fout bij het verwijderen.");
             }
@@ -510,9 +514,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
-            if (res.ok) {
+             if (res.ok) {
                 closeVenueModal();
-                loadVenues();
+                if (activeTab === "venues") {
+                    loadVenues();
+                } else if (activeTab === "scrapers") {
+                    loadScrapers();
+                }
             } else {
                 const data = await res.json();
                 alert(`Fout bij opslaan: ${data.detail || "Onbekend"}`);
@@ -893,91 +901,111 @@ document.addEventListener("DOMContentLoaded", () => {
             venues = await res.json();
             scrapersTableBody.innerHTML = "";
             
-            const scrapers = venues.filter(v => v.scraper_url);
-            
-            if (scrapers.length === 0) {
-                scrapersTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;" class="text-muted">Geen custom scrapers geconfigureerd. Voeg er een toe via de knop hierboven!</td></tr>';
+            if (venues.length === 0) {
+                scrapersTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;" class="text-muted">Geen podia geconfigureerd. Voeg er een toe via het tabblad Podia of klik op Scraper Toevoegen!</td></tr>';
                 return;
             }
             
-            scrapers.forEach(s => {
+            venues.forEach(s => {
                 const tr = document.createElement("tr");
                 
-                // Status badge
-                let statusBadge = '<span class="status-pill status-new">Nooit gedraaid</span>';
-                if (s.scraper_last_status === "success") {
-                    statusBadge = '<span class="status-pill status-interested"><i class="fa-solid fa-check"></i> Succes</span>';
-                } else if (s.scraper_last_status === "failed") {
-                    statusBadge = '<span class="status-pill status-ignored" style="cursor: pointer;" title="' + (s.scraper_error_log || '').replace(/"/g, '&quot;') + '"><i class="fa-solid fa-xmark"></i> Mislukt</span>';
-                }
+                let scraperUrlCol = '<span class="text-dark">-</span>';
+                let statusBadge = '<span class="text-dark">-</span>';
+                let lastRunTime = '<span class="text-dark">-</span>';
+                let errorSnippet = '<span class="text-dark">-</span>';
+                let enabledToggle = '';
+                let scraperButtons = '';
                 
-                // Last run time
-                const lastRunTime = s.scraper_last_run ? new Date(s.scraper_last_run).toLocaleString("nl-NL") : "Nooit";
-                
-                // Toggle switch for Enabled
-                const enabledToggle = `
-                    <label class="switch" style="position: relative; display: inline-block; width: 40px; height: 20px; margin-right: 10px; vertical-align: middle;">
-                        <input type="checkbox" class="scraper-toggle-enabled" data-id="${s.id}" ${s.scraper_enabled !== false ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
-                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${s.scraper_enabled !== false ? '#6366f1' : '#ccc'}; transition: .4s; border-radius: 20px;"></span>
-                    </label>
-                `;
-                
-                // Error snippet
-                const errorSnippet = s.scraper_error_log ? `<div class="text-muted" style="max-width: 250px; font-family: monospace; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${s.scraper_error_log.replace(/"/g, '&quot;')}">${s.scraper_error_log}</div>` : "-";
-                
-                tr.innerHTML = `
-                    <td style="font-weight: 600; color: #ffffff;">${s.name}</td>
-                    <td><a href="${s.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${s.scraper_url}</a></td>
-                    <td>${statusBadge}</td>
-                    <td class="text-muted">${lastRunTime}</td>
-                    <td>${errorSnippet}</td>
-                    <td style="text-align: right; white-space: nowrap;">
-                        ${enabledToggle}
+                if (s.scraper_url) {
+                    scraperUrlCol = `<a href="${s.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${s.scraper_url}</a>`;
+                    
+                    // Status badge
+                    statusBadge = '<span class="status-pill status-new">Nooit gedraaid</span>';
+                    if (s.scraper_last_status === "success") {
+                        statusBadge = '<span class="status-pill status-interested"><i class="fa-solid fa-check"></i> Succes</span>';
+                    } else if (s.scraper_last_status === "failed") {
+                        statusBadge = '<span class="status-pill status-ignored" style="cursor: pointer;" title="' + (s.scraper_error_log || '').replace(/"/g, '&quot;') + '"><i class="fa-solid fa-xmark"></i> Mislukt</span>';
+                    }
+                    
+                    // Last run time
+                    lastRunTime = s.scraper_last_run ? new Date(s.scraper_last_run).toLocaleString("nl-NL") : "Nooit";
+                    
+                    // Toggle switch for Enabled
+                    enabledToggle = `
+                        <label class="switch" style="position: relative; display: inline-block; width: 40px; height: 20px; margin-right: 10px; vertical-align: middle;">
+                            <input type="checkbox" class="scraper-toggle-enabled" data-id="${s.id}" ${s.scraper_enabled !== false ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${s.scraper_enabled !== false ? '#6366f1' : '#ccc'}; transition: .4s; border-radius: 20px;"></span>
+                        </label>
+                    `;
+                    
+                    // Error snippet
+                    errorSnippet = s.scraper_error_log ? `<div class="text-muted" style="max-width: 250px; font-family: monospace; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${s.scraper_error_log.replace(/"/g, '&quot;')}">${s.scraper_error_log}</div>` : "-";
+                    
+                    scraperButtons = `
                         <button class="btn btn-secondary btn-sm btn-run-scraper-tab" data-id="${s.id}" title="Nu draaien" style="margin-right: 5px; padding: 4px 8px; background: rgba(99, 102, 241, 0.15); color: #818cf8;">
                             <i class="fa-solid fa-play"></i> Run
                         </button>
                         <button class="btn btn-secondary btn-sm btn-view-code-tab" data-id="${s.id}" data-name="${s.name}" data-url="${s.scraper_url}" data-code="${(s.scraper_code || '').replace(/"/g, '&quot;')}" data-enabled="${s.scraper_enabled}" title="Bekijk code" style="margin-right: 5px; padding: 4px 8px;">
                             <i class="fa-solid fa-code"></i> Code
                         </button>
-                        <button class="btn btn-secondary btn-sm btn-delete-scraper-tab" data-id="${s.id}" title="Verwijder Scraper Link" style="padding: 4px 8px; background-color: rgba(239, 68, 68, 0.15); color: #ef4444;">
-                            <i class="fa-solid fa-trash"></i>
+                    `;
+                } else {
+                    scraperUrlCol = '<span class="text-muted" style="font-style: italic;">Geen scraper link</span>';
+                    scraperButtons = `
+                        <button class="btn btn-secondary btn-sm btn-setup-scraper-tab" data-id="${s.id}" title="Scraper instellen" style="margin-right: 5px; padding: 4px 8px; background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                            <i class="fa-solid fa-plus"></i> Scraper instellen
                         </button>
+                    `;
+                }
+                
+                tr.innerHTML = `
+                    <td style="font-weight: 600; color: #ffffff;">${s.name}</td>
+                    <td>${scraperUrlCol}</td>
+                    <td>${statusBadge}</td>
+                    <td class="text-muted">${lastRunTime}</td>
+                    <td>${errorSnippet}</td>
+                    <td style="text-align: right; white-space: nowrap;">
+                        ${enabledToggle}
+                        ${scraperButtons}
+                        <button class="btn btn-secondary btn-sm btn-edit-venue" data-id="${s.id}" style="margin-right: 5px;"><i class="fa-solid fa-pen"></i></button>
+                        <button class="btn btn-danger btn-sm btn-delete-venue" data-id="${s.id}"><i class="fa-solid fa-trash"></i></button>
                     </td>
                 `;
                 
-                tr.querySelector(".scraper-toggle-enabled").addEventListener("change", async (e) => {
-                    const id = e.target.getAttribute("data-id");
-                    const enabled = e.target.checked;
-                    await toggleVenueScraperEnabled(id, enabled);
-                    loadScrapers();
-                });
+                if (s.scraper_url) {
+                    tr.querySelector(".scraper-toggle-enabled").addEventListener("change", async (e) => {
+                        const id = e.target.getAttribute("data-id");
+                        const enabled = e.target.checked;
+                        await toggleVenueScraperEnabled(id, enabled);
+                        loadScrapers();
+                    });
+                    
+                    tr.querySelector(".btn-run-scraper-tab").addEventListener("click", async (e) => {
+                        const btnEl = e.currentTarget;
+                        const id = btnEl.getAttribute("data-id");
+                        btnEl.disabled = true;
+                        btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running';
+                        await runVenueScraper(id);
+                        btnEl.disabled = false;
+                        btnEl.innerHTML = '<i class="fa-solid fa-play"></i> Run';
+                        loadScrapers();
+                    });
+                    
+                    tr.querySelector(".btn-view-code-tab").addEventListener("click", () => {
+                        scraperCodeId.value = s.id;
+                        scraperCodeName.value = s.name;
+                        scraperCodeUrl.value = s.scraper_url;
+                        scraperCodeEnabled.checked = s.scraper_enabled !== false;
+                        scraperCodeTitle.innerText = `Scraper Code: ${s.name}`;
+                        scraperCodeTextarea.value = s.scraper_code || "";
+                        modalScraperCode.classList.add("active");
+                    });
+                } else {
+                    tr.querySelector(".btn-setup-scraper-tab").addEventListener("click", () => openVenueModal(s));
+                }
                 
-                tr.querySelector(".btn-run-scraper-tab").addEventListener("click", async (e) => {
-                    const btnEl = e.currentTarget;
-                    const id = btnEl.getAttribute("data-id");
-                    btnEl.disabled = true;
-                    btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running';
-                    await runVenueScraper(id);
-                    btnEl.disabled = false;
-                    btnEl.innerHTML = '<i class="fa-solid fa-play"></i> Run';
-                    loadScrapers();
-                });
-                
-                tr.querySelector(".btn-view-code-tab").addEventListener("click", () => {
-                    scraperCodeId.value = s.id;
-                    scraperCodeName.value = s.name;
-                    scraperCodeUrl.value = s.scraper_url;
-                    scraperCodeEnabled.checked = s.scraper_enabled !== false;
-                    scraperCodeTitle.innerText = `Scraper Code: ${s.name}`;
-                    scraperCodeTextarea.value = s.scraper_code || "";
-                    modalScraperCode.classList.add("active");
-                });
-                
-                tr.querySelector(".btn-delete-scraper-tab").addEventListener("click", async () => {
-                    if (confirm(`Weet je zeker dat je de scraper-link voor "${s.name}" wilt verwijderen? (Het podium zelf blijft bestaan)`)) {
-                        await removeScraperLink(s.id);
-                    }
-                });
+                tr.querySelector(".btn-edit-venue").addEventListener("click", () => openVenueModal(s));
+                tr.querySelector(".btn-delete-venue").addEventListener("click", () => deleteVenue(s.id));
                 
                 scrapersTableBody.appendChild(tr);
             });

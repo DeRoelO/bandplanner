@@ -780,7 +780,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     scraperCodeTitle.innerText = `Scraper Code: ${name}`;
                     scraperCodeTextarea.value = code;
                     
-                    modalScraperCode.style.display = "flex";
+                    modalScraperCode.classList.add("active");
                 });
             });
             
@@ -858,14 +858,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Scraper Modal Handlers
     btnAddScraper.addEventListener("click", () => {
         scraperForm.reset();
-        modalScraper.style.display = "flex";
+        modalScraper.classList.add("active");
     });
     
     btnCloseScraperModal.addEventListener("click", () => {
-        modalScraper.style.display = "none";
+        modalScraper.classList.remove("active");
     });
     btnCancelScraper.addEventListener("click", () => {
-        modalScraper.style.display = "none";
+        modalScraper.classList.remove("active");
     });
     
     scraperForm.addEventListener("submit", async (e) => {
@@ -885,7 +885,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify(payload)
             });
             if (res.ok) {
-                modalScraper.style.display = "none";
+                modalScraper.classList.remove("active");
                 alert("Scraper toegevoegd! Gemini genereert nu de scraping-code in de achtergrond.");
                 setTimeout(loadScrapers, 5000);
             } else {
@@ -902,10 +902,10 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Code Modal Handlers
     btnCloseCodeModal.addEventListener("click", () => {
-        modalScraperCode.style.display = "none";
+        modalScraperCode.classList.remove("active");
     });
     btnCancelCode.addEventListener("click", () => {
-        modalScraperCode.style.display = "none";
+        modalScraperCode.classList.remove("active");
     });
     
     scraperCodeForm.addEventListener("submit", async (e) => {
@@ -925,7 +925,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify(payload)
             });
             if (res.ok) {
-                modalScraperCode.style.display = "none";
+                modalScraperCode.classList.remove("active");
                 loadScrapers();
             } else {
                 alert("Fout bij opslaan code.");

@@ -276,6 +276,8 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
     for item in results:
         # Zoek of maak podium (gebruik item venue of val terug op huidige venue)
         venue_obj = find_or_create_venue(db, item.get("venue") or venue.name)
+        if not venue_obj:
+            venue_obj = venue
         
         # Parse datum
         try:

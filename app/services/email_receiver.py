@@ -138,6 +138,8 @@ def fetch_and_parse_emails(db: Session) -> int:
                 added_count = 0
                 for item in extracted:
                     venue = find_or_create_venue(db, item.venue)
+                    if not venue:
+                        continue
                     
                     # Datum parsen
                     try:

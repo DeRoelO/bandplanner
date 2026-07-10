@@ -59,46 +59,9 @@ def find_or_create_venue(db: Session, venue_name: str, city_name: str = "") -> V
         if v.name.lower() in clean_name.lower() or clean_name.lower() in v.name.lower():
             return v
 
-    # Niet gevonden in DB, we gaan geocoding proberen
-    # Eerst met zaalnaam + stad, daarna alleen stad
-    query = f"{clean_name}, {clean_city}" if clean_city else clean_name
-    coords = geocode_location(query)
-    
-    if not coords and clean_city:
-        # Fallback naar alleen de stad
-        coords = geocode_location(clean_city)
-        
-    if not coords:
-        # Fallback naar Utrecht Centraal coördinaten als we echt niks kunnen vinden
-        # Zodat de app niet crasht
-        user_config = db.query(UserConfig).first()
-        lat = user_config.home_latitude if user_config else 52.0907
-        lon = user_config.home_longitude if user_config else 5.1214
-        coords = (lat, lon)
-        print(f"Waarschuwing: Geen coördinaten gevonden voor '{query}'. Fallback naar default.")
-
-    # Categorie inschatten
-    category = "small"
-    lower_name = clean_name.lower()
-    if any(keyword in lower_name for keyword in ["stadium", "arena", "dome", "ahoy", "sportpaleis", "paleis 12", "expo"]):
-        category = "large"
-    elif any(keyword in lower_name for keyword in ["theater", "schouwburg", "hall", "concertgebouw", "tivoli", "paradiso", "melkweg"]):
-        category = "medium"
-
-    # Maak nieuwe venue aan
-    new_venue = Venue(
-        name=clean_name,
-        latitude=coords[0],
-        longitude=coords[1],
-        category=category,
-        url=None,
-        aliases=""
-    )
-    db.add(new_venue)
-    db.commit()
-    db.refresh(new_venue)
-    print(f"Nieuw podium toegevoegd aan DB: {new_venue.name} ({new_venue.category})")
-    return new_venue
+    # Niet gevonden in DB en we maken geen nieuwe podia meer automatisch aan
+    print(f"[Sync] Podium '{clean_name}' niet gevonden in database. Concert wordt overgeslagen.")
+    return None
 
 def parse_rss_feeds(db: Session) -> int:
     """
@@ -140,6 +103,8 @@ def parse_rss_feeds(db: Session) -> int:
         
         # Zoek zaal
         venue = find_or_create_venue(db, venue_name, city_name)
+        if not venue:
+            continue
         
         # Controleer of concert al bestaat (combinatie artiest, zaal en datum)
         # We vergelijken alleen de datum (jaar, maand, dag)
@@ -199,6 +164,8 @@ def parse_rss_feeds(db: Session) -> int:
         
         # Voor festivals maken we een virtueel podium aan
         venue = find_or_create_venue(db, festival_name, city_name)
+        if not venue:
+            continue
         
         start_of_day = datetime.datetime(concert_date.year, concert_date.month, concert_date.day)
         end_of_day = start_of_day + datetime.timedelta(days=1)

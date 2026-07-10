@@ -640,6 +640,8 @@ def parse_email_newsletter(data: EmailParseRequest, db: Session = Depends(get_db
             from app.services.rss import find_or_create_venue
             # Zoek of maak podium
             venue = find_or_create_venue(db, item.venue)
+            if not venue:
+                continue
             
             # Datum parsen
             try:

@@ -27,50 +27,82 @@ async def background_sync_loop():
     while True:
         try:
             print("[Background Task] Start automatische synchronisatie...")
-            db = SessionLocal()
-            try:
-                # 1. Sync RSS feeds
-                new_count = await asyncio.to_thread(parse_rss_feeds, db)
-                
-                # 2. Sync IMAP email newsletters
-                from app.services.email_receiver import fetch_and_parse_emails
+            
+            # 1. Sync RSS feeds
+            def sync_rss_task():
+                db = SessionLocal()
                 try:
-                    new_email_count = await asyncio.to_thread(fetch_and_parse_emails, db)
-                    new_count += new_email_count
+                    return parse_rss_feeds(db)
+                finally:
+                    db.close()
+            new_count = await asyncio.to_thread(sync_rss_task)
+            
+            # 2. Sync IMAP email newsletters
+            def sync_email_task():
+                db = SessionLocal()
+                try:
+                    from app.services.email_receiver import fetch_and_parse_emails
+                    return fetch_and_parse_emails(db)
                 except Exception as email_err:
                     print(f"[Background Task] Fout bij ophalen e-mails: {email_err}")
-                
-                # 2b. Run custom scrapers
-                from app.services.scraper_manager import run_custom_scraper
-                venues_with_scrapers = db.query(Venue).filter(Venue.scraper_url != None, Venue.scraper_enabled == True).all()
-                for venue in venues_with_scrapers:
+                    return 0
+                finally:
+                    db.close()
+            new_count += await asyncio.to_thread(sync_email_task)
+            
+            # 2b. Run custom scrapers
+            def run_scrapers_task():
+                db = SessionLocal()
+                try:
+                    from app.services.scraper_manager import run_custom_scraper
+                    venues_with_scrapers = db.query(Venue).filter(Venue.scraper_url != None, Venue.scraper_enabled == True).all()
+                    for venue in venues_with_scrapers:
+                        try:
+                            # Note: run scrapers sequentially inside this thread to avoid concurrency issues
+                            run_custom_scraper(db, venue)
+                        except Exception as scraper_err:
+                            print(f"[Background Task] Fout bij draaien scraper voor '{venue.name}': {scraper_err}")
+                finally:
+                    db.close()
+            await asyncio.to_thread(run_scrapers_task)
+            
+            # 3. Score nieuwe concerten
+            def score_task():
+                db = SessionLocal()
+                try:
+                    return score_all_new_concerts(db)
+                finally:
+                    db.close()
+            high_matches = await asyncio.to_thread(score_task)
+            
+            # 4. Verstuur e-mails voor nieuwe aanbevelingen
+            if high_matches:
+                def notify_task():
+                    db = SessionLocal()
                     try:
-                        await asyncio.to_thread(run_custom_scraper, db, venue)
-                    except Exception as scraper_err:
-                        print(f"[Background Task] Fout bij draaien scraper voor '{venue.name}': {scraper_err}")
+                        to_notify = [c for c in high_matches if not c.notified]
+                        if to_notify:
+                            success = notify_new_concerts(db, to_notify)
+                            if success:
+                                for c in to_notify:
+                                    c.notified = True
+                                db.commit()
+                                print(f"[Background Task] E-mail verstuurd voor {len(to_notify)} concerten.")
+                    finally:
+                        db.close()
+                await asyncio.to_thread(notify_task)
                 
-                # 3. Score nieuwe concerten
-                high_matches = await asyncio.to_thread(score_all_new_concerts, db)
-                
-                # 4. Verstuur e-mails voor nieuwe aanbevelingen
-                if high_matches:
-                    to_notify = [c for c in high_matches if not c.notified]
-                    if to_notify:
-                        success = await asyncio.to_thread(notify_new_concerts, db, to_notify)
-                        if success:
-                            for c in to_notify:
-                                c.notified = True
-                            db.commit()
-                            print(f"[Background Task] E-mail verstuurd voor {len(to_notify)} concerten.")
-            except Exception as e:
-                print(f"[Background Task] Fout tijdens sync loop: {e}")
-                # Stuur een e-mail notificatie over de fout
-                notify_parser_error(db, f"Fout in automatische sync loop:\n{e}")
-            finally:
-                db.close()
         except asyncio.CancelledError:
             print("[Background Task] Synchronisatie loop geannuleerd.")
             break
+        except Exception as e:
+            print(f"[Background Task] Fout tijdens sync loop: {e}")
+            # Stuur een e-mail notificatie over de fout
+            db_err = SessionLocal()
+            try:
+                notify_parser_error(db_err, f"Fout in automatische sync loop:\n{e}")
+            finally:
+                db_err.close()
         
         # Elke 12 uur synchroniseren
         print("[Background Task] Volgende sync over 12 uur.")

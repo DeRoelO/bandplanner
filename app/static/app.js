@@ -332,13 +332,6 @@ document.addEventListener("DOMContentLoaded", () => {
         venues.forEach(v => {
             const tr = document.createElement("tr");
             
-            let catBadge = `<span class="status-badge new">${v.category.toUpperCase()}</span>`;
-            if (v.category === "large") {
-                catBadge = `<span class="status-badge interested">${v.category.toUpperCase()}</span>`;
-            } else if (v.category === "medium") {
-                catBadge = `<span class="status-badge" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">${v.category.toUpperCase()}</span>`;
-            }
-            
             const website = v.url ? `<a href="${v.url}" target="_blank" style="color: var(--primary);"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</a>` : '<span class="text-dark">-</span>';
             
             // Scraper column & buttons
@@ -351,10 +344,22 @@ document.addEventListener("DOMContentLoaded", () => {
                 } else if (v.scraper_last_status === "failed") {
                     statusBadge = '<span class="status-pill status-ignored" style="font-size: 11px; padding: 2px 6px;" title="' + (v.scraper_error_log || '').replace(/"/g, '&quot;') + '"><i class="fa-solid fa-xmark"></i> Fail</span>';
                 }
+                
+                // Toggle switch for Enabled
+                const enabledToggle = `
+                    <label class="switch" style="position: relative; display: inline-block; width: 40px; height: 20px; margin-right: 10px; vertical-align: middle;">
+                        <input type="checkbox" class="scraper-toggle-enabled" data-id="${v.id}" ${v.scraper_enabled !== false ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${v.scraper_enabled !== false ? '#6366f1' : '#ccc'}; transition: .4s; border-radius: 20px;"></span>
+                    </label>
+                `;
+
                 scraperCol = `
-                    <div style="font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        <a href="${v.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${v.scraper_url}</a>
-                        <div style="margin-top: 4px;">${statusBadge}</div>
+                    <div style="font-size: 12px; max-width: 300px; display: flex; align-items: center;">
+                        ${enabledToggle}
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            <a href="${v.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${v.scraper_url}</a>
+                            <div style="margin-top: 4px;">${statusBadge}</div>
+                        </div>
                     </div>
                 `;
                 scraperButtons = `
@@ -365,10 +370,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             tr.innerHTML = `
                 <td style="font-weight: bold; color: #ffffff;">${v.name}</td>
-                <td>${catBadge}</td>
-                <td class="text-muted" style="font-size: 13px;">${v.latitude.toFixed(4)}, ${v.longitude.toFixed(4)}</td>
                 <td>${website}</td>
-                <td class="text-muted" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${v.aliases || '<span class="text-dark">Geen</span>'}</td>
                 <td>${scraperCol}</td>
                 <td style="text-align: right; white-space: nowrap;">
                     ${scraperButtons}
@@ -382,6 +384,12 @@ document.addEventListener("DOMContentLoaded", () => {
             tr.querySelector(".btn-delete-venue").addEventListener("click", () => deleteVenue(v.id));
             
             if (v.scraper_url) {
+                tr.querySelector(".scraper-toggle-enabled").addEventListener("change", async (e) => {
+                    const id = e.target.getAttribute("data-id");
+                    const enabled = e.target.checked;
+                    await toggleVenueScraperEnabled(id, enabled);
+                });
+                
                 tr.querySelector(".btn-run-scraper").addEventListener("click", async (e) => {
                     const btn = e.currentTarget;
                     btn.disabled = true;
@@ -395,7 +403,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     scraperCodeId.value = v.id;
                     scraperCodeName.value = v.name;
                     scraperCodeUrl.value = v.scraper_url;
-                    scraperCodeEnabled.value = v.scraper_enabled;
+                    scraperCodeEnabled.checked = v.scraper_enabled !== false;
                     scraperCodeTitle.innerText = `Scraper Code: ${v.name}`;
                     scraperCodeTextarea.value = v.scraper_code || "";
                     modalScraperCode.classList.add("active");
@@ -742,6 +750,35 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("Netwerkfout: " + err.message);
         }
     }
+
+    async function toggleVenueScraperEnabled(id, enabled) {
+        try {
+            const venue = venues.find(v => v.id == id);
+            if (venue) {
+                const payload = {
+                    name: venue.name,
+                    category: venue.category,
+                    latitude: venue.latitude,
+                    longitude: venue.longitude,
+                    url: venue.url,
+                    aliases: venue.aliases,
+                    
+                    scraper_url: venue.scraper_url,
+                    scraper_enabled: enabled,
+                    scraper_code: venue.scraper_code
+                };
+                const res = await fetch(`/api/venues/${id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) alert("Fout bij wijzigen status.");
+            }
+            loadVenues();
+        } catch (err) {
+            console.error(err);
+        }
+    }
     
     // Code Modal Handlers
     btnCloseCodeModal.addEventListener("click", () => {
@@ -771,7 +808,7 @@ document.addEventListener("DOMContentLoaded", () => {
             aliases: venue.aliases,
             
             scraper_url: venue.scraper_url,
-            scraper_enabled: scraperCodeEnabled.value === "true",
+            scraper_enabled: scraperCodeEnabled.checked,
             scraper_code: scraperCodeTextarea.value
         };
         
@@ -809,6 +846,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     const v = venues.find(x => x.id == id);
                     if (v) {
                         scraperCodeTextarea.value = v.scraper_code || "";
+                        scraperCodeEnabled.checked = v.scraper_enabled !== false;
                     }
                     btnHealScraperManual.disabled = false;
                     btnHealScraperManual.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Forceer Gemini Reparatie';

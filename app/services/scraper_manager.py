@@ -177,6 +177,32 @@ STRATEGY_LABELS = {
 }
 
 
+def _purge_garbage_concerts(db: Session, venue: Venue) -> int:
+    """
+    Verwijdert automatisch concerten van dit podium waarvan de artiestennaam
+    duidelijk een UI-label of navigatietekst is (bijv. 'wachtlijst', 'speeldata').
+    Wordt aangeroepen na elke succesvolle scraper-run om stale rommel op te ruimen.
+    """
+    source_prefix = f"scraper_{venue.name.lower().replace(' ', '_')}"
+    concerts = db.query(Concert).filter(
+        Concert.venue_id == venue.id,
+        Concert.source.like(f"{source_prefix}%")
+    ).all()
+
+    removed = 0
+    for concert in concerts:
+        if discovery.is_garbage_artist(concert.artist):
+            print(f"[Scraper Manager] Garbage concert verwijderd: '{concert.artist}' ({venue.name})")
+            db.delete(concert)
+            removed += 1
+
+    if removed:
+        db.commit()
+        print(f"[Scraper Manager] {removed} garbage concert(en) verwijderd voor '{venue.name}'")
+
+    return removed
+
+
 def _save_concerts(db: Session, venue: Venue, events: list[dict]) -> List[Concert]:
     """Slaat een lijst van genormaliseerde event-dicts op als Concert-rijen."""
     user_config = load_user_config()
@@ -258,8 +284,10 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
         try:
             events = discovery.run_strategy(venue.name, venue.scraper_url, strategy, config)
             if events:
+                events = discovery.filter_garbage_events(events)
                 errors = discovery.validate_events(events)
                 if not errors:
+                    _purge_garbage_concerts(db, venue)
                     added = _save_concerts(db, venue, events)
                     label = STRATEGY_LABELS.get(strategy, strategy)
                     venue.scraper_last_run = datetime.now()
@@ -310,7 +338,9 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
                 events = result["sample_events"]
 
             if events:
+                events = discovery.filter_garbage_events(events)
                 added = _save_concerts(db, venue, events)
+                _purge_garbage_concerts(db, venue)
                 venue.scraper_last_run = datetime.now()
                 venue.scraper_last_status = "success"
                 venue.scraper_error_log = None
@@ -394,6 +424,21 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
         venue.scraper_error_log = "Geen events gevonden"
         db.commit()
         return []
+
+    # Filter garbage artiestennamen vóór opslaan
+    events = discovery.filter_garbage_events(events)
+    if not events:
+        venue.scraper_last_run = datetime.now()
+        venue.scraper_last_status = "failed"
+        venue.scraper_error_log = "Alle gevonden events hadden garbage-artiestennamen. Herdicover wordt getriggerd."
+        venue.scraper_strategy = None  # Reset zodat discovery opnieuw draait
+        venue.scraper_config = None
+        db.commit()
+        print(f"[Scraper Manager] '{venue.name}': alle events waren garbage. Strategie gereset voor herdicover.")
+        return []
+
+    # Ruim bestaande garbage-concerten op
+    _purge_garbage_concerts(db, venue)
 
     added = _save_concerts(db, venue, events)
 

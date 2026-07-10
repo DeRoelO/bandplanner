@@ -10,6 +10,9 @@ Probeert per podium automatisch de beste gegevensbron te vinden via:
 De gevonden strategie wordt opgeslagen in de Venue.scraper_strategy en
 Venue.scraper_config velden, zodat periodieke runs niet opnieuw hoeven
 te discoveren.
+
+Validatie controleert ook op garbage-artiestennamen (UI-labels, navigatietekst)
+en triggert automatisch herdicover als de kwaliteit niet klopt.
 """
 
 import json
@@ -38,6 +41,30 @@ MONTHS_NL = {
     "jul": 7, "juli": 7, "aug": 8, "augustus": 8, "sep": 9, "september": 9,
     "okt": 10, "oktober": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
+
+# Woorden die NOOIT een artiestnaam zijn — UI-labels, navigatie, agenda-termen
+GARBAGE_ARTIST_WORDS = {
+    # Nederlands
+    "wachtlijst", "speeldata", "agenda", "programma", "voorstelling", "uitverkocht",
+    "beschikbaar", "tickets", "kopen", "info", "meer info", "lees meer", "details",
+    "inloggen", "aanmelden", "registreren", "menu", "zoeken", "filter", "categorie",
+    "datum", "locatie", "zaal", "prijs", "gratis", "uitverkoop", "kaartverkoop",
+    "home", "terug", "verder", "volgende", "vorige", "sluiten", "open",
+    "ja", "nee", "ok", "annuleren", "bevestigen", "opslaan",
+    "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag",
+    "ma", "di", "wo", "do", "vr", "za", "zo",
+    "januari", "februari", "maart", "april", "mei", "juni", "juli",
+    "augustus", "september", "oktober", "november", "december",
+    # Engels
+    "waitlist", "sold out", "buy tickets", "more info", "read more",
+    "login", "register", "search", "filter", "category", "location",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "today", "tomorrow", "this week",
+    # Peppered / CMS specifiek
+    "speeldata en tijden", "wachtrij", "meerdere tijdstippen", "koekbouw",
+    "voorverkoop", "persbericht", "aankondiging", "nieuwsbrief",
+}
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,14 +95,12 @@ def parse_date_str(s: str) -> Optional[str]:
         return None
     s = s.strip()
 
-    # ISO / datetime strings
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
         try:
             return datetime.strptime(s[:19], fmt).strftime("%Y-%m-%d")
         except ValueError:
             pass
 
-    # Nederlandse datum: "12 mei 2026", "12 mei", "za 12 mei 2026"
     s_lower = s.lower()
     for month_name, month_num in MONTHS_NL.items():
         if month_name in s_lower:
@@ -113,8 +138,50 @@ def score_json_candidate(data) -> int:
     return score
 
 
+# ─── Garbage-detectie ─────────────────────────────────────────────────────────
+
+def is_garbage_artist(name: str) -> bool:
+    """Geeft True terug als de naam duidelijk geen artiestnaam is."""
+    if not name:
+        return True
+    cleaned = name.strip().lower()
+    if len(cleaned) <= 1:
+        return True
+    # Alleen cijfers
+    if re.match(r"^\d+$", cleaned):
+        return True
+    # Exacte match met blacklist
+    if cleaned in GARBAGE_ARTIST_WORDS:
+        return True
+    # Dag-afkorting + getal ("za 11", "vr 10 jul")
+    if re.match(r"^(ma|di|wo|do|vr|za|zo)\s+\d", cleaned):
+        return True
+    # Puur datum-string ("12 juli 2026")
+    if re.match(r"^\d{1,2}\s+[a-z]+\s+\d{2,4}$", cleaned):
+        return True
+    return False
+
+
+def filter_garbage_events(events: list[dict]) -> list[dict]:
+    """Filtert aantoonbaar foute events eruit (garbage artiesten, geen datum)."""
+    return [
+        e for e in events
+        if not is_garbage_artist(e.get("artist", "")) and e.get("date")
+    ]
+
+
+# ─── Validatie ────────────────────────────────────────────────────────────────
+
 def validate_events(events: list[dict]) -> list[str]:
-    """Valideert een lijst met events en retourneert een lijst met foutmeldingen."""
+    """
+    Valideert een lijst met events op kwaliteit.
+    Geeft een lijst met foutmeldingen terug (leeg = geldig).
+
+    Controleert op:
+    - Voldoende artiesten en datums
+    - Garbage-artiestennamen (UI-labels, navigatietekst)
+    - Toekomstige events
+    """
     errors = []
     if not events:
         errors.append("Geen evenementen gevonden")
@@ -122,13 +189,22 @@ def validate_events(events: list[dict]) -> list[str]:
 
     with_artist = sum(1 for e in events if e.get("artist"))
     with_date = sum(1 for e in events if e.get("date"))
-    with_url = sum(1 for e in events if e.get("url"))
 
     if with_artist / len(events) < 0.7:
         errors.append(f"Minder dan 70% heeft een artiest ({with_artist}/{len(events)})")
     if with_date / len(events) < 0.7:
         errors.append(f"Minder dan 70% heeft een datum ({with_date}/{len(events)})")
 
+    # Garbage-detectie: hoeveel artiesten zijn duidelijk geen namen?
+    garbage = [e for e in events if is_garbage_artist(e.get("artist", ""))]
+    if garbage and len(garbage) / len(events) >= 0.3:
+        examples = [e.get("artist") for e in garbage[:3]]
+        errors.append(
+            f"{len(garbage)}/{len(events)} artiestennamen zijn UI-labels of navigatietekst "
+            f"(bijv. {examples}). De scraper pakt de verkeerde HTML-elementen."
+        )
+
+    # URL-deduplicatie
     urls = [e["url"] for e in events if e.get("url")]
     if urls and len(urls) != len(set(urls)):
         errors.append("Dubbele event-URL's gevonden")
@@ -169,7 +245,6 @@ def extract_jsonld_events(html: str, venue_name: str) -> list[dict]:
             if not isinstance(obj, dict):
                 continue
 
-            # Verwerk @graph arrays
             candidates = []
             graph = obj.get("@graph", [])
             if isinstance(graph, list):
@@ -184,7 +259,6 @@ def extract_jsonld_events(html: str, venue_name: str) -> list[dict]:
                 if not ({"Event", "MusicEvent", "TheaterEvent", "SocialEvent"} & set(event_type)):
                     continue
 
-                # Artiest ophalen
                 artist = None
                 performer = candidate.get("performer") or candidate.get("artists")
                 if isinstance(performer, list) and performer:
@@ -197,14 +271,11 @@ def extract_jsonld_events(html: str, venue_name: str) -> list[dict]:
                 if not artist:
                     artist = candidate.get("name", "")
 
-                # Datum ophalen
                 raw_date = candidate.get("startDate") or candidate.get("startdate") or candidate.get("date")
                 date_str = parse_date_str(str(raw_date)) if raw_date else None
 
-                # URL ophalen
                 url = candidate.get("url") or candidate.get("@id")
 
-                # Prijs ophalen
                 price = None
                 offers = candidate.get("offers")
                 if isinstance(offers, dict):
@@ -220,7 +291,7 @@ def extract_jsonld_events(html: str, venue_name: str) -> list[dict]:
                     except (ValueError, TypeError):
                         price = None
 
-                if artist and date_str:
+                if artist and date_str and not is_garbage_artist(artist):
                     events.append({
                         "artist": artist.strip(),
                         "date": date_str,
@@ -251,7 +322,6 @@ def discover_wordpress_api(html: str, page_url: str) -> list[str]:
         if link_type == "application/json" and "wp-json" in href:
             candidates.append(urljoin(page_url, href))
 
-    # Probeer standaard endpoint
     base = f"{urlparse(page_url).scheme}://{urlparse(page_url).netloc}"
     candidates.append(f"{base}/wp-json/")
 
@@ -272,7 +342,6 @@ def find_wordpress_event_endpoint(api_index_url: str) -> Optional[str]:
     for route_path in routes:
         lower = route_path.lower()
         if any(kw in lower for kw in EVENT_ROUTE_KEYWORDS):
-            # Geef voorkeur aan kortere routes (minder specifiek = lijst endpoint)
             if best is None or len(route_path) < len(best):
                 best = route_path
 
@@ -294,7 +363,6 @@ def extract_wordpress_events(endpoint: str, venue_name: str) -> list[dict]:
         if not isinstance(item, dict):
             continue
 
-        # Titel / artiest
         artist = None
         title_field = item.get("title")
         if isinstance(title_field, dict):
@@ -304,7 +372,6 @@ def extract_wordpress_events(endpoint: str, venue_name: str) -> list[dict]:
         if not artist:
             artist = item.get("name") or item.get("post_title") or ""
 
-        # Datum - probeer common ACF/meta velden
         raw_date = (
             item.get("acf", {}).get("date")
             or item.get("acf", {}).get("event_date")
@@ -317,7 +384,7 @@ def extract_wordpress_events(endpoint: str, venue_name: str) -> list[dict]:
 
         url = item.get("link") or item.get("url")
 
-        if artist and date_str:
+        if artist and date_str and not is_garbage_artist(artist):
             events.append({
                 "artist": artist.strip(),
                 "date": date_str,
@@ -355,7 +422,6 @@ def find_event_arrays(data, venue_name: str, depth: int = 0) -> list[dict]:
     events = []
 
     if isinstance(data, list) and len(data) >= 2:
-        # Check of dit een lijst van event-achtige objecten is
         sample = data[:5]
         keys_union = set()
         for item in sample:
@@ -371,7 +437,6 @@ def find_event_arrays(data, venue_name: str, depth: int = 0) -> list[dict]:
                 if not isinstance(item, dict):
                     continue
 
-                # Artiest
                 artist = (
                     item.get("title") or item.get("name") or item.get("artist")
                     or item.get("performer") or item.get("heading") or ""
@@ -379,7 +444,6 @@ def find_event_arrays(data, venue_name: str, depth: int = 0) -> list[dict]:
                 if isinstance(artist, dict):
                     artist = artist.get("rendered") or artist.get("value") or ""
 
-                # Datum
                 raw_date = (
                     item.get("startDate") or item.get("start_date") or item.get("startdate")
                     or item.get("date") or item.get("dateStart") or item.get("event_date")
@@ -388,7 +452,7 @@ def find_event_arrays(data, venue_name: str, depth: int = 0) -> list[dict]:
 
                 url = item.get("url") or item.get("link") or item.get("permalink")
 
-                if artist and date_str:
+                if artist and date_str and not is_garbage_artist(str(artist)):
                     events.append({
                         "artist": str(artist).strip(),
                         "date": date_str,
@@ -399,7 +463,6 @@ def find_event_arrays(data, venue_name: str, depth: int = 0) -> list[dict]:
             if events:
                 return events
 
-    # Recursief zoeken in dicts en lists
     if isinstance(data, dict):
         for value in data.values():
             sub = find_event_arrays(value, venue_name, depth + 1)
@@ -419,7 +482,6 @@ def extract_embedded_json_events(html: str, venue_name: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     candidates = []
 
-    # Via HTML selectors
     for selector in EMBEDDED_SELECTORS:
         for script in soup.select(selector):
             text = script.get_text(strip=True)
@@ -432,7 +494,6 @@ def extract_embedded_json_events(html: str, venue_name: str) -> list[dict]:
             except json.JSONDecodeError:
                 pass
 
-    # Via regex patronen in inline scripts
     for script in soup.find_all("script"):
         text = script.get_text()
         for pattern in EMBEDDED_PATTERNS:
@@ -447,7 +508,6 @@ def extract_embedded_json_events(html: str, venue_name: str) -> list[dict]:
     if not candidates:
         return []
 
-    # Sorteer op score, probeer beste kandidaat eerst
     candidates.sort(key=lambda x: x[0], reverse=True)
     for _, data in candidates[:3]:
         events = find_event_arrays(data, venue_name)

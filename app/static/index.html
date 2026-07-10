@@ -31,6 +31,10 @@
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
                     <span>Gemini Parser</span>
                 </a>
+                <a class="nav-item" data-tab="scrapers">
+                    <i class="fa-solid fa-spider"></i>
+                    <span>Custom Scrapers</span>
+                </a>
                 <a class="nav-item" data-tab="settings">
                     <i class="fa-solid fa-sliders"></i>
                     <span>Instellingen</span>
@@ -139,6 +143,39 @@
                     <p class="text-muted" id="parser-results-summary" style="margin-bottom: 15px;"></p>
                     <div class="grid" id="parser-results-grid">
                         <!-- Extracted concert cards will be displayed here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: SCRAPERS -->
+            <div class="tab-content" id="tab-scrapers">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2>Custom Scrapers (Self-Healing)</h2>
+                        <button class="btn btn-primary btn-sm" id="btn-add-scraper">
+                            <i class="fa-solid fa-plus"></i> Scraper Toevoegen
+                        </button>
+                    </div>
+                    <p class="text-muted" style="margin-bottom: 20px;">
+                        Beheer de BeautifulSoup-parsers van je poppodia. Gemini controleert de websites dagelijks en repareert de scraping-code automatisch bij layout-wijzigingen!
+                    </p>
+                    
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Naam Podium</th>
+                                    <th>URL programmapagina</th>
+                                    <th>Status</th>
+                                    <th>Laatste Run</th>
+                                    <th>Foutmelding</th>
+                                    <th style="text-align: right;">Acties</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scrapers-table-body">
+                                <!-- Dynamically loaded with venues that have scraper_url -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -415,6 +452,33 @@
                         <button type="button" class="btn btn-secondary" id="btn-cancel-code">Annuleren</button>
                         <button type="submit" class="btn btn-primary">Code Opslaan</button>
                     </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: SCRAPER TOEVOEGEN -->
+    <div class="modal" id="modal-scraper">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Custom Scraper Toevoegen</h3>
+                <span class="modal-close" id="btn-close-scraper-modal">&times;</span>
+            </div>
+            <form id="scraper-form">
+                <div class="form-group">
+                    <label for="scraper-form-name">Naam Podium</label>
+                    <input type="text" id="scraper-form-name" required placeholder="Bijv. OLT Goffert" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="scraper-form-url">Programma Website URL</label>
+                    <input type="text" id="scraper-form-url" required placeholder="https://www.oltgoffert.nl/programma" autocomplete="off">
+                </div>
+                <p class="text-muted" style="margin-top: 10px; font-size: 13px;">
+                    <i class="fa-solid fa-circle-info"></i> Gemini zal de website analyseren en de BeautifulSoup parser genereren. Dit podium wordt direct toegevoegd aan je Podia &amp; Zalen.
+                </p>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-scraper">Annuleren</button>
+                    <button type="submit" class="btn btn-primary" id="btn-submit-scraper">Opslaan</button>
                 </div>
             </form>
         </div>

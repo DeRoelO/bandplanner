@@ -60,6 +60,11 @@ class Venue(Base):
     scraper_last_run = Column(DateTime, nullable=True)
     scraper_last_status = Column(String, nullable=True)  # 'success', 'failed'
     scraper_error_log = Column(String, nullable=True)
+    # Discovery engine velden
+    scraper_strategy = Column(String, nullable=True)   # 'jsonld', 'wordpress', 'embedded_json', 'html_gemini'
+    scraper_config = Column(JSON, nullable=True)       # Strategie-specifieke config (bijv. API endpoint)
+    scraper_event_count = Column(Integer, nullable=True)  # Aantal events bij laatste succesvolle run
+
 
     concerts = relationship("Concert", back_populates="venue")
 

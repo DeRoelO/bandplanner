@@ -14,47 +14,40 @@ from app.models import Concert, Venue, ArtistPreference
 from app.services.config_manager import load_user_config
 from app.services.rss import find_or_create_venue
 from app.services.scoring import score_concert
+from app.services import discovery
 
-# Eenvoudige HTML opschoning om token usage te beperken
+# ─── Gemini helpers ───────────────────────────────────────────────────────────
+
 def clean_html_for_gemini(html_content: str) -> str:
     if not html_content:
         return ""
     soup = BeautifulSoup(html_content, "html.parser")
-    # Verwijder script, style, head, meta, footer, nav
     for tag in soup(["script", "style", "head", "meta", "footer", "nav", "svg", "noscript"]):
         tag.decompose()
-        
-    # Retourneer de eerste ~15000 tekens van de HTML representatie
     return str(soup)[:15000]
 
+
 def execute_scraper_code(code: str, html: str) -> List[Dict[str, Any]]:
-    """
-    Voert de gegenereerde Python code uit in een gecontroleerde sandbox.
-    """
-    # Compileer de code eerst om syntaxfouten te vangen
+    """Voert gegenereerde Python scraper-code uit in een sandbox."""
     compiled_code = compile(code, "<custom_scraper>", "exec")
-    
-    # Sandbox met alleen veilige en benodigde libraries
+
     sandbox_globals = {
         "BeautifulSoup": BeautifulSoup,
-        "urllib": urllib,
+        "urllib": urllib.parse,
         "re": re,
         "datetime": datetime,
         "print": print,
     }
-    
-    # Uitvoeren van het script
     exec(compiled_code, sandbox_globals, sandbox_globals)
-    
+
     if "scrape" not in sandbox_globals:
         raise ValueError("Het script definieert geen 'scrape(html)' functie.")
-        
+
     results = sandbox_globals["scrape"](html)
-    
+
     if not isinstance(results, list):
         raise ValueError(f"De 'scrape' functie gaf een {type(results)} in plaats van een list.")
-        
-    # Valideer en normaliseer resultaten
+
     validated_results = []
     for item in results:
         if not isinstance(item, dict):
@@ -62,10 +55,10 @@ def execute_scraper_code(code: str, html: str) -> List[Dict[str, Any]]:
         artist = item.get("artist")
         date_str = item.get("date")
         venue = item.get("venue")
-        
+
         if not artist or not date_str or not venue:
-            continue # Verplichte velden
-            
+            continue
+
         validated_results.append({
             "artist": str(artist).strip(),
             "date": str(date_str).strip(),
@@ -73,21 +66,23 @@ def execute_scraper_code(code: str, html: str) -> List[Dict[str, Any]]:
             "price": float(item["price"]) if item.get("price") is not None else None,
             "url": str(item["url"]).strip() if item.get("url") else None
         })
-        
+
     return validated_results
 
-def generate_scraper_code(name: str, url: str, html: str) -> str:
-    """
-    Vraagt Gemini om een Python BeautifulSoup scraper te genereren voor de gegeven HTML.
-    """
+
+def _get_gemini_client():
     user_config = load_user_config()
     api_key = user_config.get("gemini_api_key") or settings.GEMINI_API_KEY
     if not api_key:
         raise ValueError("Gemini API Key ontbreekt in config.json of .env.")
-        
-    client = genai.Client(api_key=api_key)
+    return genai.Client(api_key=api_key)
+
+
+def generate_scraper_code(name: str, url: str, html: str) -> str:
+    """Vraagt Gemini om een BeautifulSoup scraper te genereren."""
+    client = _get_gemini_client()
     cleaned_html = clean_html_for_gemini(html)
-    
+
     prompt = f"""
     Je bent een expert Python scraper ontwikkelaar. Schrijf een Python functie `scrape(html: str) -> list[dict]` die concerten/programma-items extraheert uit de HTML van de website '{name}' ({url}).
     
@@ -109,36 +104,27 @@ def generate_scraper_code(name: str, url: str, html: str) -> str:
     
     Geef ALTIJD en UITSLUITEND de rauwe Python code terug. Geen markdown blocks zoals ```python, geen inleiding, geen uitleg. Gewoon direct de code.
     """
-    
+
     response = client.models.generate_content(
         model='gemini-flash-lite-latest',
         contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.1
-        )
+        config=types.GenerateContentConfig(temperature=0.1)
     )
-    
+
     code = response.text.strip()
-    # Strip eventuele markdown code blocks indien Gemini ze toch gaf
     if code.startswith("```python"):
         code = code.split("```python")[1].split("```")[0].strip()
     elif code.startswith("```"):
         code = code.split("```")[1].split("```")[0].strip()
-        
+
     return code
 
+
 def heal_scraper_code(venue: Venue, html: str, error_msg: str) -> str:
-    """
-    Triggert Gemini om een falend scraper-script te repareren op basis van de foutmelding en HTML.
-    """
-    user_config = load_user_config()
-    api_key = user_config.get("gemini_api_key") or settings.GEMINI_API_KEY
-    if not api_key:
-        raise ValueError("Gemini API Key ontbreekt in config.json of .env.")
-        
-    client = genai.Client(api_key=api_key)
+    """Vraagt Gemini om een falend script te repareren."""
+    client = _get_gemini_client()
     cleaned_html = clean_html_for_gemini(html)
-    
+
     prompt = f"""
     Je bent een expert Python scraper ontwikkelaar. Een door jou gegenereerd scraper-script voor '{venue.name}' ({venue.scraper_url}) is gefaald of heeft 0 resultaten opgeleverd.
     
@@ -161,40 +147,183 @@ def heal_scraper_code(venue: Venue, html: str, error_msg: str) -> str:
     Volg dezelfde regels:
     1. Functie moet `scrape(html: str) -> list[dict]` heten.
     2. Velden: 'artist', 'date', 'venue' (moet '{venue.name}' zijn), 'price', 'url'.
-    3. Maak links absoluut met `urllib.parse.urljoin('{venue.scraper_url}', link)`.
+    3. Maak links absoluut met `urllib.parse.urljoin('{venue.scraper_url}', link)`
     
     Geef ALTIJD en UITSLUITEND de rauwe Python code terug. Geen markdown blocks zoals ```python, geen inleiding, geen uitleg. Gewoon direct de code.
     """
-    
+
     response = client.models.generate_content(
         model='gemini-flash-lite-latest',
         contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.1
-        )
+        config=types.GenerateContentConfig(temperature=0.1)
     )
-    
+
     code = response.text.strip()
     if code.startswith("```python"):
         code = code.split("```python")[1].split("```")[0].strip()
     elif code.startswith("```"):
         code = code.split("```")[1].split("```")[0].strip()
-        
+
     return code
+
+
+# ─── Core scraper run ─────────────────────────────────────────────────────────
+
+STRATEGY_LABELS = {
+    "jsonld": "JSON-LD",
+    "wordpress": "WordPress API",
+    "embedded_json": "Embedded JSON",
+    "html_gemini": "HTML + Gemini",
+}
+
+
+def _save_concerts(db: Session, venue: Venue, events: list[dict]) -> List[Concert]:
+    """Slaat een lijst van genormaliseerde event-dicts op als Concert-rijen."""
+    user_config = load_user_config()
+    top_artists = db.query(ArtistPreference).filter(ArtistPreference.source == "top_artist").all()
+    top_genres_freq = {}
+    for ta in top_artists:
+        if ta.genres:
+            for genre in ta.genres:
+                top_genres_freq[genre.lower()] = top_genres_freq.get(genre.lower(), 0) + ta.user_score
+
+    import datetime as dt_mod
+
+    added_concerts = []
+    for item in events:
+        venue_obj = find_or_create_venue(db, item.get("venue") or venue.name)
+        if not venue_obj:
+            venue_obj = venue
+
+        try:
+            date_str = item["date"]
+            if "T" in date_str:
+                concert_date = datetime.fromisoformat(date_str)
+            else:
+                concert_date = datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            concert_date = datetime.now()
+
+        start_of_day = datetime(concert_date.year, concert_date.month, concert_date.day)
+        end_of_day = start_of_day + dt_mod.timedelta(days=1)
+
+        exists = db.query(Concert).filter(
+            Concert.artist.ilike(item["artist"]),
+            Concert.venue_id == venue_obj.id,
+            Concert.date >= start_of_day,
+            Concert.date < end_of_day
+        ).first()
+
+        if not exists:
+            new_concert = Concert(
+                artist=item["artist"],
+                venue_id=venue_obj.id,
+                date=concert_date,
+                price=item.get("price"),
+                url=item.get("url"),
+                source=f"scraper_{venue.name.lower().replace(' ', '_')}",
+                status="new"
+            )
+            db.add(new_concert)
+            db.commit()
+            db.refresh(new_concert)
+
+            score = score_concert(db, new_concert, top_genres_freq, user_config, allow_spotify_lookup=False)
+            new_concert.calculated_score = score
+            db.commit()
+            db.refresh(new_concert)
+
+            added_concerts.append(new_concert)
+
+    return added_concerts
+
 
 def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> List[Concert]:
     """
-    Haalt de HTML op, voert de scraper uit, repareert indien nodig (Self-Healing)
-    en slaat de gevonden concerten op.
+    Haalt events op voor een podium. Gebruikt de opgeslagen strategie als die beschikbaar is,
+    anders voert eerst discovery uit.
+
+    Volgorde:
+      1. Opgeslagen strategie uitvoeren (jsonld / wordpress / embedded_json)
+      2. Als geen strategie → discovery uitvoeren en opslaan
+      3. Bij html_gemini: Gemini BeautifulSoup code gebruiken / genereren
     """
     print(f"[Scraper Manager] Start scraper '{venue.name}' ({venue.scraper_url})...")
-    
-    # 1. Haal HTML op
+
+    strategy = venue.scraper_strategy
+    config = venue.scraper_config or {}
+
+    # ── Stap A: Run opgeslagen niet-Gemini strategie direct ───────────────
+    if strategy and strategy != "html_gemini" and not force_heal:
+        try:
+            events = discovery.run_strategy(venue.name, venue.scraper_url, strategy, config)
+            if events:
+                errors = discovery.validate_events(events)
+                if not errors:
+                    added = _save_concerts(db, venue, events)
+                    label = STRATEGY_LABELS.get(strategy, strategy)
+                    venue.scraper_last_run = datetime.now()
+                    venue.scraper_last_status = "success"
+                    venue.scraper_error_log = None
+                    venue.scraper_event_count = len(events)
+                    db.commit()
+                    print(f"[Scraper Manager] '{venue.name}' ({label}): {len(events)} events, {len(added)} nieuw.")
+                    return added
+                else:
+                    # Strategie geeft events terug maar validatie faalt → herdicover
+                    print(f"[Scraper Manager] Validatie mislukt voor '{venue.name}': {errors}. Herdicover...")
+                    strategy = None
+            else:
+                # 0 events → strategie waarschijnlijk gebroken, reset en herdicover
+                print(f"[Scraper Manager] '{venue.name}' strategie {strategy} gaf 0 events. Herdicover...")
+                strategy = None
+        except Exception as e:
+            if "__HTML__:" in str(e):
+                # html_gemini sentinel → doorsturen naar Gemini flow hieronder
+                strategy = "html_gemini"
+            else:
+                print(f"[Scraper Manager] Strategie fout voor '{venue.name}': {e}. Herdicover...")
+                strategy = None
+
+    # ── Stap B: Discovery (als er nog geen strategie is) ─────────────────
+    if not strategy:
+        result = discovery.discover_best_strategy(venue.name, venue.scraper_url)
+        strategy = result["strategy"]
+        config = result["config"]
+
+        # Sla de gevonden strategie op voor volgende runs
+        venue.scraper_strategy = strategy
+        venue.scraper_config = config
+        db.commit()
+
+        label = STRATEGY_LABELS.get(strategy, strategy)
+        print(f"[Scraper Manager] Discovery resultaat voor '{venue.name}': {label} "
+              f"(confidence {result['confidence']:.0%})")
+
+        if strategy != "html_gemini" and result["sample_events"]:
+            # We hebben al events uit discovery, sla ze op
+            events = result["sample_events"]
+            # Maar haal dan ook de volledige lijst op
+            try:
+                events = discovery.run_strategy(venue.name, venue.scraper_url, strategy, config)
+            except Exception:
+                events = result["sample_events"]
+
+            if events:
+                added = _save_concerts(db, venue, events)
+                venue.scraper_last_run = datetime.now()
+                venue.scraper_last_status = "success"
+                venue.scraper_error_log = None
+                venue.scraper_event_count = len(events)
+                db.commit()
+                print(f"[Scraper Manager] '{venue.name}' ({label}): {len(events)} events, {len(added)} nieuw.")
+                return added
+
+    # ── Stap C: html_gemini fallback ──────────────────────────────────────
     try:
-        response = requests.get(venue.scraper_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-        if response.status_code != 200:
-            raise Exception(f"HTTP Status {response.status_code}")
-        html = response.text
+        resp = requests.get(venue.scraper_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        resp.raise_for_status()
+        html = resp.text
     except Exception as e:
         error_msg = f"Fout bij ophalen van website: {e}"
         print(f"[Scraper Manager] {error_msg}")
@@ -204,14 +333,13 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
         db.commit()
         return []
 
-    # Indien er nog geen code is, genereer deze eerst
     if not venue.scraper_code:
         try:
             print(f"[Scraper Manager] Geen code gevonden. Genereren via Gemini...")
             venue.scraper_code = generate_scraper_code(venue.name, venue.scraper_url, html)
             db.commit()
         except Exception as e:
-            error_msg = f"Fout bij initialiseren scraper-code via Gemini: {e}"
+            error_msg = f"Fout bij genereren scraper-code via Gemini: {e}"
             print(f"[Scraper Manager] {error_msg}")
             venue.scraper_last_run = datetime.now()
             venue.scraper_last_status = "failed"
@@ -219,40 +347,39 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
             db.commit()
             return []
 
-    # 2. Voer de code uit (en pas eventueel healing toe)
-    results = []
+    # Voer de Gemini-code uit
+    events = []
     error_occurred = False
     error_msg = ""
-    
+
     try:
-        results = execute_scraper_code(venue.scraper_code, html)
-        if not results:
-            # Als er 0 resultaten zijn, kan het zijn dat de selectors zijn veranderd (dus falen/healen)
+        events = execute_scraper_code(venue.scraper_code, html)
+        if not events:
             raise ValueError("Het script heeft 0 concerten kunnen extraheren.")
     except Exception as e:
         error_occurred = True
         error_msg = f"{e}\n{traceback.format_exc()}"
         print(f"[Scraper Manager] Scraper '{venue.name}' faalde: {e}")
 
-    # 3. Self-Healing activeert bij fouten
+    # Self-Healing bij fouten
     if error_occurred or force_heal:
         try:
             print(f"[Scraper Manager] Auto-reparatie (Self-Healing) activeren voor '{venue.name}'...")
-            fixed_code = heal_scraper_code(venue, html, error_msg if not force_heal else "Handmatige reparatie geforceerd.")
+            fixed_code = heal_scraper_code(
+                venue, html,
+                error_msg if not force_heal else "Handmatige reparatie geforceerd."
+            )
             print(f"[Scraper Manager] Nieuwe code ontvangen. Testen...")
-            
-            # Test de nieuwe code
-            results = execute_scraper_code(fixed_code, html)
-            if not results:
+
+            events = execute_scraper_code(fixed_code, html)
+            if not events:
                 raise ValueError("Gecorrigeerde code retourneerde nog steeds 0 resultaten.")
-                
-            # Als de nieuwe code werkt, sla hem op!
+
             venue.scraper_code = fixed_code
             error_occurred = False
             error_msg = ""
             print(f"[Scraper Manager] Scraper '{venue.name}' succesvol gerepareerd door Gemini!")
         except Exception as heal_err:
-            # Healing ook mislukt
             error_msg = f"Originele fout:\n{error_msg}\n\nReparatie mislukt:\n{heal_err}"
             print(f"[Scraper Manager] Self-Healing mislukt voor '{venue.name}': {heal_err}")
             venue.scraper_last_run = datetime.now()
@@ -261,73 +388,20 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
             db.commit()
             return []
 
-    # 4. Sla concerten op in database
-    added_concerts = []
-    
-    # Haal smaakprofiel op voor scoring
-    user_config = load_user_config()
-    top_artists = db.query(ArtistPreference).filter(ArtistPreference.source == "top_artist").all()
-    top_genres_freq = {}
-    for ta in top_artists:
-        if ta.genres:
-            for genre in ta.genres:
-                top_genres_freq[genre.lower()] = top_genres_freq.get(genre.lower(), 0) + ta.user_score
+    if not events:
+        venue.scraper_last_run = datetime.now()
+        venue.scraper_last_status = "failed"
+        venue.scraper_error_log = "Geen events gevonden"
+        db.commit()
+        return []
 
-    for item in results:
-        # Zoek of maak podium (gebruik item venue of val terug op huidige venue)
-        venue_obj = find_or_create_venue(db, item.get("venue") or venue.name)
-        if not venue_obj:
-            venue_obj = venue
-        
-        # Parse datum
-        try:
-            date_str = item["date"]
-            if "T" in date_str:
-                concert_date = datetime.fromisoformat(date_str)
-            else:
-                concert_date = datetime.strptime(date_str, "%Y-%m-%d")
-        except Exception:
-            concert_date = datetime.now() # Fallback
-            
-        start_of_day = datetime(concert_date.year, concert_date.month, concert_date.day)
-        import datetime as dt_mod
-        end_of_day = start_of_day + dt_mod.timedelta(days=1)
-        
-        # Controleer of het concert al bestaat
-        exists = db.query(Concert).filter(
-            Concert.artist.ilike(item["artist"]),
-            Concert.venue_id == venue_obj.id,
-            Concert.date >= start_of_day,
-            Concert.date < end_of_day
-        ).first()
-        
-        if not exists:
-            new_concert = Concert(
-                artist=item["artist"],
-                venue_id=venue_obj.id,
-                date=concert_date,
-                price=item["price"],
-                url=item["url"],
-                source=f"scraper_{venue.name.lower().replace(' ', '_')}",
-                status="new"
-            )
-            db.add(new_concert)
-            db.commit()
-            db.refresh(new_concert)
-            
-            # Bereken match score
-            score = score_concert(db, new_concert, top_genres_freq, user_config, allow_spotify_lookup=False)
-            new_concert.calculated_score = score
-            db.commit()
-            db.refresh(new_concert)
-            
-            added_concerts.append(new_concert)
-            
-    # Update scraper status
+    added = _save_concerts(db, venue, events)
+
     venue.scraper_last_run = datetime.now()
     venue.scraper_last_status = "success"
     venue.scraper_error_log = None
+    venue.scraper_event_count = len(events)
     db.commit()
-    
-    print(f"[Scraper Manager] Scraper '{venue.name}' afgerond. {len(added_concerts)} nieuwe concerten toegevoegd.")
-    return added_concerts
+
+    print(f"[Scraper Manager] Scraper '{venue.name}' afgerond (Gemini). {len(added)} nieuwe concerten toegevoegd.")
+    return added

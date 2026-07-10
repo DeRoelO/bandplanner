@@ -771,6 +771,21 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    async function triggerDiscover(id) {
+        try {
+            const res = await fetch(`/api/venues/${id}/discover`, { method: "POST" });
+            if (res.ok) {
+                alert("Discovery gestart! Het systeem zoekt nu de beste databron (JSON-LD, WordPress API, etc.). Vernieuw over een paar seconden om de strategie te zien.");
+            } else {
+                const data = await res.json();
+                alert("Fout bij starten discovery: " + (data.detail || "Onbekend"));
+            }
+        } catch (err) {
+            alert("Netwerkfout: " + err.message);
+        }
+    }
+
+
     async function toggleVenueScraperEnabled(id, enabled) {
         try {
             const venue = venues.find(v => v.id == id);
@@ -915,12 +930,27 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (s.scraper_url) {
                     scraperUrlCol = `<div style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${s.scraper_url}"><a href="${s.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${s.scraper_url}</a></div>`;
                     
-                    // Status badge
+                    // Status badge + strategy badge
                     statusBadge = '<span class="status-pill status-new">Nooit gedraaid</span>';
                     if (s.scraper_last_status === "success") {
                         statusBadge = '<span class="status-pill status-interested"><i class="fa-solid fa-check"></i> Succes</span>';
                     } else if (s.scraper_last_status === "failed") {
                         statusBadge = '<span class="status-pill status-ignored" style="cursor: pointer;" title="' + (s.scraper_error_log || '').replace(/"/g, '&quot;') + '"><i class="fa-solid fa-xmark"></i> Mislukt</span>';
+                    }
+
+                    // Strategy badge
+                    const strategyLabels = {
+                        'jsonld': { label: 'JSON-LD', color: '#34d399', icon: 'fa-code' },
+                        'wordpress': { label: 'WordPress API', color: '#60a5fa', icon: 'fa-wordpress' },
+                        'embedded_json': { label: 'Embedded JSON', color: '#fbbf24', icon: 'fa-database' },
+                        'html_gemini': { label: 'Gemini HTML', color: '#a78bfa', icon: 'fa-robot' },
+                    };
+                    if (s.scraper_strategy && strategyLabels[s.scraper_strategy]) {
+                        const sl = strategyLabels[s.scraper_strategy];
+                        const evtCount = s.scraper_event_count ? ` · ${s.scraper_event_count} events` : '';
+                        statusBadge += ` <span style="display: inline-block; margin-top: 4px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: ${sl.color}; border: 1px solid ${sl.color}40;"><i class="fa-solid ${sl.icon}"></i> ${sl.label}${evtCount}</span>`;
+                    } else if (s.scraper_url) {
+                        statusBadge += ` <span style="display: inline-block; margin-top: 4px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: #9ca3af; border: 1px solid #9ca3af40;"><i class="fa-solid fa-magnifying-glass"></i> Nog niet ontdekt</span>`;
                     }
                     
                     // Last run time
@@ -940,6 +970,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     scraperButtons = `
                         <button class="btn btn-secondary btn-sm btn-run-scraper-tab" data-id="${s.id}" title="Nu draaien" style="margin-right: 5px; padding: 4px 8px; background: rgba(99, 102, 241, 0.15); color: #818cf8;">
                             <i class="fa-solid fa-play"></i> Run
+                        </button>
+                        <button class="btn btn-secondary btn-sm btn-discover-tab" data-id="${s.id}" title="Beste databron zoeken (discovery)" style="margin-right: 5px; padding: 4px 8px; background: rgba(16, 185, 129, 0.12); color: #34d399;">
+                            <i class="fa-solid fa-magnifying-glass"></i> Discover
                         </button>
                         <button class="btn btn-secondary btn-sm btn-view-code-tab" data-id="${s.id}" data-name="${s.name}" data-url="${s.scraper_url}" data-code="${(s.scraper_code || '').replace(/"/g, '&quot;')}" data-enabled="${s.scraper_enabled}" title="Bekijk code" style="margin-right: 5px; padding: 4px 8px;">
                             <i class="fa-solid fa-code"></i> Code
@@ -985,6 +1018,17 @@ document.addEventListener("DOMContentLoaded", () => {
                         btnEl.disabled = false;
                         btnEl.innerHTML = '<i class="fa-solid fa-play"></i> Run';
                         loadScrapers();
+                    });
+
+                    tr.querySelector(".btn-discover-tab").addEventListener("click", async (e) => {
+                        const btnEl = e.currentTarget;
+                        const id = btnEl.getAttribute("data-id");
+                        btnEl.disabled = true;
+                        btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Zoeken...';
+                        await triggerDiscover(id);
+                        setTimeout(() => { loadScrapers(); }, 500);
+                        btnEl.disabled = false;
+                        btnEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Discover';
                     });
                     
                     tr.querySelector(".btn-view-code-tab").addEventListener("click", () => {

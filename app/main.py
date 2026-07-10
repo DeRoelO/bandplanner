@@ -142,6 +142,12 @@ def apply_automatic_migrations(db_engine):
                     conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_last_status VARCHAR"))
                 if "scraper_error_log" not in venue_cols:
                     conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_error_log VARCHAR"))
+                if "scraper_strategy" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_strategy VARCHAR"))
+                if "scraper_config" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_config JSON"))
+                if "scraper_event_count" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_event_count INTEGER"))
                 conn.commit()
         except Exception as err:
             print(f"Fout bij migreren venues tabel: {err}")
@@ -473,9 +479,15 @@ def update_venue(venue_id: int, data: VenueCreateUpdate, background_tasks: Backg
     venue.aliases = data.aliases
     
     # Scraper config
+    old_scraper_url = venue.scraper_url
     venue.scraper_url = data.scraper_url
     venue.scraper_code = data.scraper_code
     venue.scraper_enabled = data.scraper_enabled if data.scraper_enabled is not None else True
+    # Reset opgeslagen strategie als de URL is veranderd zodat discovery opnieuw draait
+    if data.scraper_url != old_scraper_url:
+        venue.scraper_strategy = None
+        venue.scraper_config = None
+        venue.scraper_event_count = None
     
     db.commit()
     db.refresh(venue)
@@ -518,6 +530,40 @@ def trigger_venue_scraper_run(venue_id: int, background_tasks: BackgroundTasks, 
             
     background_tasks.add_task(manual_run)
     return {"status": "sync_triggered"}
+
+
+@app.post("/api/venues/{venue_id}/discover")
+def trigger_discovery(venue_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Voert onboarding-discovery uit voor een podium: zoekt de beste databron en slaat de strategie op."""
+    venue = db.query(Venue).filter(Venue.id == venue_id).first()
+    if not venue:
+        raise HTTPException(status_code=404, detail="Podium niet gevonden.")
+    if not venue.scraper_url:
+        raise HTTPException(status_code=400, detail="Dit podium heeft geen scraper URL geconfigureerd.")
+
+    def discovery_run():
+        from app.services import discovery
+        sync_db = SessionLocal()
+        try:
+            v = sync_db.query(Venue).filter(Venue.id == venue_id).first()
+            if not v:
+                return
+            # Reset eerst zodat discovery opnieuw begint
+            v.scraper_strategy = None
+            v.scraper_config = None
+            sync_db.commit()
+            # Voer discovery + initiële scrape uit
+            from app.services.scraper_manager import run_custom_scraper
+            run_custom_scraper(sync_db, v)
+            from app.services.spotify import enrich_unknown_artists
+            enrich_unknown_artists(sync_db)
+        except Exception as err:
+            print(f"[Discovery] Fout bij onboarding van '{venue_id}': {err}")
+        finally:
+            sync_db.close()
+
+    background_tasks.add_task(discovery_run)
+    return {"status": "discovery_triggered"}
 
 @app.delete("/api/venues/{venue_id}")
 def delete_venue(venue_id: int, db: Session = Depends(get_db)):

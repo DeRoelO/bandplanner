@@ -403,20 +403,6 @@
                     <label for="venue-form-aliases">Aliases (Komma-gescheiden alternatieve namen)</label>
                     <input type="text" id="venue-form-aliases" placeholder="Bijv. Paradiso Amsterdam, Paradiso Grote Zaal">
                 </div>
-                
-                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
-                <h4 style="margin-bottom: 10px; color: #ffffff;"><i class="fa-solid fa-spider"></i> Custom Website Scraper (Optioneel)</h4>
-                
-                <div class="form-group">
-                    <label for="venue-form-scraper-url">Scraper URL (programmapagina)</label>
-                    <input type="text" id="venue-form-scraper-url" autocomplete="off" placeholder="Bijv. https://www.oltgoffert.nl/programma">
-                </div>
-                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
-                    <input type="checkbox" id="venue-form-scraper-enabled" checked style="width: auto; margin: 0; cursor: pointer;">
-                    <label for="venue-form-scraper-enabled" style="margin: 0; cursor: pointer;">Scraper Actief</label>
-                </div>
-                <input type="hidden" id="venue-form-scraper-code">
-
                 <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
                     <button type="button" class="btn btn-secondary" id="btn-cancel-venue">Annuleren</button>
                     <button type="submit" class="btn btn-primary">Opslaan</button>
@@ -461,20 +447,25 @@
     <div class="modal" id="modal-scraper">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Custom Scraper Toevoegen</h3>
+                <h3 id="scraper-modal-title">Custom Scraper Toevoegen</h3>
                 <span class="modal-close" id="btn-close-scraper-modal">&times;</span>
             </div>
             <form id="scraper-form">
+                <input type="hidden" id="scraper-id">
                 <div class="form-group">
                     <label for="scraper-form-name">Naam Podium</label>
                     <input type="text" id="scraper-form-name" required placeholder="Bijv. OLT Goffert" autocomplete="off">
                 </div>
                 <div class="form-group">
                     <label for="scraper-form-url">Programma Website URL</label>
-                    <input type="text" id="scraper-form-url" required placeholder="https://www.oltgoffert.nl/programma" autocomplete="off">
+                    <input type="text" id="scraper-form-url" autocomplete="off" placeholder="https://www.oltgoffert.nl/programma">
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="scraper-form-enabled" checked style="width: auto; margin: 0; cursor: pointer;">
+                    <label for="scraper-form-enabled" style="margin: 0; cursor: pointer;">Scraper Actief</label>
                 </div>
                 <p class="text-muted" style="margin-top: 10px; font-size: 13px;">
-                    <i class="fa-solid fa-circle-info"></i> Gemini zal de website analyseren en de BeautifulSoup parser genereren. Dit podium wordt direct toegevoegd aan je Podia &amp; Zalen.
+                    <i class="fa-solid fa-circle-info"></i> Gemini zal de website analyseren en de BeautifulSoup parser genereren. Dit podium wordt direct toegevoegd/bijgewerkt.
                 </p>
                 <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
                     <button type="button" class="btn btn-secondary" id="btn-cancel-scraper">Annuleren</button>
@@ -485,6 +476,6 @@
     </div>
 
     <!-- Script Entry -->
-    <script src="/app.js?v=2.0.1"></script>
+    <script src="/app.js?v=2.0.2"></script>
 </body>
 </html>

@@ -81,18 +81,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnCloseModal = document.getElementById("btn-close-modal");
     const btnCancelVenue = document.getElementById("btn-cancel-venue");
 
-    // Venue Scraper inputs
-    const venueFormScraperUrl = document.getElementById("venue-form-scraper-url");
-    const venueFormScraperEnabled = document.getElementById("venue-form-scraper-enabled");
-    const venueFormScraperCode = document.getElementById("venue-form-scraper-code");
-    
     // Scrapers Tab & Modal elements
     const scrapersTableBody = document.getElementById("scrapers-table-body");
     const btnAddScraper = document.getElementById("btn-add-scraper");
     const modalScraper = document.getElementById("modal-scraper");
     const scraperForm = document.getElementById("scraper-form");
+    const scraperIdInput = document.getElementById("scraper-id");
+    const scraperModalTitle = document.getElementById("scraper-modal-title");
     const scraperFormName = document.getElementById("scraper-form-name");
     const scraperFormUrl = document.getElementById("scraper-form-url");
+    const scraperFormEnabled = document.getElementById("scraper-form-enabled");
     const btnCloseScraperModal = document.getElementById("btn-close-scraper-modal");
     const btnCancelScraper = document.getElementById("btn-cancel-scraper");
     const btnSubmitScraper = document.getElementById("btn-submit-scraper");
@@ -464,10 +462,6 @@ document.addEventListener("DOMContentLoaded", () => {
             venueFormLon.value = venue.longitude;
             venueFormUrl.value = venue.url || "";
             venueFormAliases.value = venue.aliases || "";
-            
-            venueFormScraperUrl.value = venue.scraper_url || "";
-            venueFormScraperEnabled.checked = venue.scraper_enabled !== false;
-            venueFormScraperCode.value = venue.scraper_code || "";
         } else {
             document.getElementById("modal-title").innerText = "Podium Toevoegen";
             venueIdInput.value = "";
@@ -476,10 +470,6 @@ document.addEventListener("DOMContentLoaded", () => {
             // Default coördinaten Utrecht
             venueFormLat.value = 52.0907;
             venueFormLon.value = 5.1214;
-            
-            venueFormScraperUrl.value = "";
-            venueFormScraperEnabled.checked = true;
-            venueFormScraperCode.value = "";
         }
         venueModal.classList.add("active");
     }
@@ -492,6 +482,8 @@ document.addEventListener("DOMContentLoaded", () => {
     venueForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const id = venueIdInput.value;
+        const venue = id ? venues.find(v => v.id == id) : null;
+        
         const payload = {
             name: venueFormName.value.trim(),
             category: venueFormCategory.value,
@@ -500,9 +492,9 @@ document.addEventListener("DOMContentLoaded", () => {
             url: venueFormUrl.value.trim() || null,
             aliases: venueFormAliases.value.trim() || "",
             
-            scraper_url: venueFormScraperUrl.value.trim() || null,
-            scraper_enabled: venueFormScraperEnabled.checked,
-            scraper_code: venueFormScraperCode.value.trim() || null
+            scraper_url: venue ? venue.scraper_url : null,
+            scraper_enabled: venue ? (venue.scraper_enabled !== false) : true,
+            scraper_code: venue ? venue.scraper_code : null
         };
         
         const url = id ? `/api/venues/${id}` : "/api/venues";
@@ -1001,10 +993,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         modalScraperCode.classList.add("active");
                     });
                 } else {
-                    tr.querySelector(".btn-setup-scraper-tab").addEventListener("click", () => openVenueModal(s));
+                    tr.querySelector(".btn-setup-scraper-tab").addEventListener("click", () => openScraperModal(s));
                 }
                 
-                tr.querySelector(".btn-edit-venue").addEventListener("click", () => openVenueModal(s));
+                tr.querySelector(".btn-edit-venue").addEventListener("click", () => openScraperModal(s));
                 tr.querySelector(".btn-delete-venue").addEventListener("click", () => deleteVenue(s.id));
                 
                 scrapersTableBody.appendChild(tr);
@@ -1048,10 +1040,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Scraper Modal Controls
-    btnAddScraper.addEventListener("click", () => {
-        scraperForm.reset();
+    function openScraperModal(venue = null) {
+        if (venue) {
+            scraperModalTitle.innerText = "Custom Scraper Bewerken";
+            scraperIdInput.value = venue.id;
+            scraperFormName.value = venue.name;
+            scraperFormUrl.value = venue.scraper_url || "";
+            scraperFormEnabled.checked = venue.scraper_enabled !== false;
+        } else {
+            scraperModalTitle.innerText = "Custom Scraper Toevoegen";
+            scraperIdInput.value = "";
+            scraperForm.reset();
+            scraperFormEnabled.checked = true;
+        }
         modalScraper.classList.add("active");
-    });
+    }
+
+    btnAddScraper.addEventListener("click", () => openScraperModal());
     
     btnCloseScraperModal.addEventListener("click", () => {
         modalScraper.classList.remove("active");
@@ -1063,35 +1068,67 @@ document.addEventListener("DOMContentLoaded", () => {
     
     scraperForm.addEventListener("submit", async (e) => {
         e.preventDefault();
+        const id = scraperIdInput.value;
         
-        const payload = {
-            name: scraperFormName.value.trim(),
-            category: "medium",
-            latitude: 52.0907, // Default Utrecht Centraal
-            longitude: 5.1214,
-            url: null,
-            aliases: "",
-            scraper_url: scraperFormUrl.value.trim(),
-            scraper_enabled: true,
-            scraper_code: null
-        };
+        let payload = {};
+        if (id) {
+            // Edit existing scraper: find venue to preserve category, location, url, aliases, code
+            const venue = venues.find(v => v.id == id);
+            if (!venue) {
+                alert("Podium niet gevonden.");
+                return;
+            }
+            payload = {
+                name: scraperFormName.value.trim(),
+                category: venue.category,
+                latitude: venue.latitude,
+                longitude: venue.longitude,
+                url: venue.url,
+                aliases: venue.aliases,
+                
+                scraper_url: scraperFormUrl.value.trim() || null,
+                scraper_enabled: scraperFormEnabled.checked,
+                scraper_code: venue.scraper_code
+            };
+        } else {
+            // Add new scraper
+            payload = {
+                name: scraperFormName.value.trim(),
+                category: "medium",
+                latitude: 52.0907, // Default Utrecht Centraal
+                longitude: 5.1214,
+                url: null,
+                aliases: "",
+                
+                scraper_url: scraperFormUrl.value.trim() || null,
+                scraper_enabled: scraperFormEnabled.checked,
+                scraper_code: null
+            };
+        }
         
         btnSubmitScraper.disabled = true;
         btnSubmitScraper.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Opslaan...';
         
+        const url = id ? `/api/venues/${id}` : "/api/venues";
+        const method = id ? "PUT" : "POST";
+        
         try {
-            const res = await fetch("/api/venues", {
-                method: "POST",
+            const res = await fetch(url, {
+                method: method,
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
             if (res.ok) {
                 modalScraper.classList.remove("active");
-                alert("Scraper toegevoegd! Gemini genereert nu de scraping-code in de achtergrond.");
-                setTimeout(loadScrapers, 5000);
+                if (id) {
+                    loadScrapers();
+                } else {
+                    alert("Scraper toegevoegd! Gemini genereert nu de scraping-code in de achtergrond.");
+                    setTimeout(loadScrapers, 5000);
+                }
             } else {
                 const data = await res.json();
-                alert("Fout bij toevoegen scraper: " + data.detail);
+                alert("Fout bij opslaan scraper: " + data.detail);
             }
         } catch (err) {
             alert("Netwerkfout: " + err.message);

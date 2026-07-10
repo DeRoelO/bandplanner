@@ -882,13 +882,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
                     // Strategy badge
                     const strategyLabels = {
+                        'rss': { label: 'RSS Feed', color: '#10b981', icon: 'fa-rss' },
                         'jsonld': { label: 'JSON-LD', color: '#34d399', icon: 'fa-code' },
-                        'playwright_jsonld': { label: 'PW + JSON-LD', color: '#34d399', icon: 'fa-chrome' },
                         'wordpress': { label: 'WordPress API', color: '#60a5fa', icon: 'fa-wordpress' },
                         'embedded_json': { label: 'Embedded JSON', color: '#fbbf24', icon: 'fa-database' },
-                        'playwright_embedded_json': { label: 'PW + Embedded', color: '#fbbf24', icon: 'fa-chrome' },
                         'html_gemini': { label: 'Gemini HTML', color: '#a78bfa', icon: 'fa-robot' },
-                        'playwright_gemini': { label: 'PW + Gemini', color: '#f472b6', icon: 'fa-chrome' },
                     };
                     if (s.scraper_strategy && strategyLabels[s.scraper_strategy]) {
                         const sl = strategyLabels[s.scraper_strategy];

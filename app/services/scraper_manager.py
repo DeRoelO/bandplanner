@@ -183,13 +183,11 @@ def heal_scraper_code(venue: Venue, html: str, error_msg: str) -> str:
 # ─── Core scraper run ─────────────────────────────────────────────────────────
 
 STRATEGY_LABELS = {
+    "rss": "RSS Feed",
     "jsonld": "JSON-LD",
-    "playwright_jsonld": "Playwright + JSON-LD",
     "wordpress": "WordPress API",
     "embedded_json": "Embedded JSON",
-    "playwright_embedded_json": "Playwright + Embedded JSON",
     "html_gemini": "HTML + Gemini",
-    "playwright_gemini": "Playwright + Gemini",
 }
 
 

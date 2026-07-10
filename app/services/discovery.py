@@ -24,6 +24,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+import feedparser
 
 # ─── Constanten ──────────────────────────────────────────────────────────────
 
@@ -244,6 +245,89 @@ def validate_events(events: list[dict]) -> list[str]:
         errors.append("Geen toekomstige evenementen gevonden")
 
     return errors
+
+
+# ─── Adapter 0: RSS/Atom Feeds ────────────────────────────────────────────────
+
+def discover_rss_feeds(html: str, page_url: str) -> list[str]:
+    """Zoekt RSS of Atom feeds in HTML link-tags en probeert standaard feed paden."""
+    soup = BeautifulSoup(html, "html.parser")
+    candidates = []
+
+    # Zoek in link tags
+    for link in soup.select('link[type="application/rss+xml"], link[type="application/atom+xml"], link[type="text/xml"]'):
+        href = link.get("href")
+        if href:
+            candidates.append(urljoin(page_url, href))
+
+    # Probeer ook een aantal bekende standaard agenda feed-paden
+    base = f"{urlparse(page_url).scheme}://{urlparse(page_url).netloc}"
+    standard_paths = [
+        "/feed", "/rss", "/agenda/rss", "/agenda/feed", "/programma/rss",
+        "/programma/feed", "/events/rss", "/agenda.xml", "/feed.xml"
+    ]
+    for path in standard_paths:
+        candidates.append(f"{base}{path}")
+        parsed_url = urlparse(page_url)
+        if parsed_url.path and parsed_url.path != "/":
+            path_stripped = parsed_url.path.rstrip("/")
+            candidates.append(f"{base}{path_stripped}{path}")
+
+    return list(dict.fromkeys(candidates))
+
+
+def extract_rss_events(feed_url: str, venue_name: str) -> list[dict]:
+    """Haalt events op uit een RSS of Atom feed en normaliseert ze."""
+    try:
+        resp = requests.get(feed_url, headers=HEADERS, timeout=TIMEOUT)
+        if resp.status_code != 200:
+            return []
+            
+        feed = feedparser.parse(resp.text)
+        events = []
+        
+        for entry in feed.entries:
+            title = entry.get("title", "")
+            
+            raw_date = (
+                entry.get("published") 
+                or entry.get("updated") 
+                or entry.get("event_start_date") 
+                or entry.get("start_date")
+            )
+            
+            date_str = parse_date_str(str(raw_date)) if raw_date else None
+            
+            if not date_str:
+                summary = entry.get("summary", "") or entry.get("description", "")
+                date_match = re.search(r"\b\d{1,2}\s+[a-z]{3,9}\s+\d{4}\b", summary.lower())
+                if date_match:
+                    date_str = parse_date_str(date_match.group(0))
+            
+            if not date_str and "published_parsed" in entry and entry.published_parsed:
+                try:
+                    date_str = date(
+                        entry.published_parsed.tm_year, 
+                        entry.published_parsed.tm_mon, 
+                        entry.published_parsed.tm_mday
+                    ).isoformat()
+                except Exception:
+                    pass
+
+            url = entry.get("link") or entry.get("id")
+
+            if title and date_str and not is_garbage_artist(title):
+                events.append({
+                    "artist": title.strip(),
+                    "date": date_str,
+                    "venue": venue_name,
+                    "price": None,
+                    "url": url,
+                })
+        return events
+    except Exception as e:
+        print(f"[Discovery] RSS parse fout voor {feed_url}: {e}")
+        return []
 
 
 # ─── Adapter 1: JSON-LD ───────────────────────────────────────────────────────
@@ -601,22 +685,24 @@ def discover_best_strategy(venue_name: str, url: str) -> dict:
             "errors": [f"Kon pagina niet ophalen: {e}"]
         }
 
-    # ── Strategie 1: JSON-LD ──────────────────────────────────────────────
+    # ── Strategie 1: RSS Feeds (Hoogste prioriteit) ─────────────────────────
     try:
-        events = extract_jsonld_events(html, venue_name)
-        if events:
-            errors = validate_events(events)
-            if not errors:
-                print(f"[Discovery] JSON-LD succesvol: {len(events)} events gevonden")
-                return {
-                    "strategy": "jsonld",
-                    "config": {"url": url},
-                    "sample_events": events[:3],
-                    "confidence": 0.95,
-                    "errors": []
-                }
+        feed_candidates = discover_rss_feeds(html, url)
+        for feed_url in feed_candidates:
+            events = extract_rss_events(feed_url, venue_name)
+            if events:
+                errors = validate_events(events)
+                if not errors:
+                    print(f"[Discovery] RSS Feed succesvol: {len(events)} events via {feed_url}")
+                    return {
+                        "strategy": "rss",
+                        "config": {"feed_url": feed_url},
+                        "sample_events": events[:3],
+                        "confidence": 0.98,
+                        "errors": []
+                    }
     except Exception as e:
-        print(f"[Discovery] JSON-LD fout: {e}")
+        print(f"[Discovery] RSS detectie fout: {e}")
 
     # ── Strategie 2: WordPress REST API ──────────────────────────────────
     try:
@@ -639,7 +725,24 @@ def discover_best_strategy(venue_name: str, url: str) -> dict:
     except Exception as e:
         print(f"[Discovery] WordPress fout: {e}")
 
-    # ── Strategie 3: Embedded JSON ────────────────────────────────────────
+    # ── Strategie 3: JSON-LD (Schema.org) ─────────────────────────────────
+    try:
+        events = extract_jsonld_events(html, venue_name)
+        if events:
+            errors = validate_events(events)
+            if not errors:
+                print(f"[Discovery] JSON-LD succesvol: {len(events)} events gevonden")
+                return {
+                    "strategy": "jsonld",
+                    "config": {"url": url},
+                    "sample_events": events[:3],
+                    "confidence": 0.95,
+                    "errors": []
+                }
+    except Exception as e:
+        print(f"[Discovery] JSON-LD fout: {e}")
+
+    # ── Strategie 4: Embedded JSON ────────────────────────────────────────
     try:
         events = extract_embedded_json_events(html, venue_name)
         if events:
@@ -673,6 +776,12 @@ def run_strategy(venue_name: str, url: str, strategy: str, config: dict) -> list
     Voert een opgeslagen strategie uit zonder opnieuw te discoveren.
     Retourneert een lijst van genormaliseerde event-dicts.
     """
+    if strategy == "rss":
+        feed_url = config.get("feed_url")
+        if not feed_url:
+            raise Exception("RSS feed_url niet gevonden in config")
+        return extract_rss_events(feed_url, venue_name)
+
     try:
         html, _ = fetch_html(config.get("url") or url)
     except Exception as e:

@@ -461,7 +461,7 @@ document.addEventListener("DOMContentLoaded", () => {
             venueFormCategory.value = venue.category;
             venueFormLat.value = venue.latitude;
             venueFormLon.value = venue.longitude;
-            venueFormCity.value = ""; // Leeg bij bewerken tenzij ze willen overschrijven
+            venueFormCity.value = venue.city || "";
             venueFormUrl.value = venue.url || "";
             venueFormAliases.value = venue.aliases || "";
         } else {
@@ -913,7 +913,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 let scraperButtons = '';
                 
                 if (s.scraper_url) {
-                    scraperUrlCol = `<a href="${s.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${s.scraper_url}</a>`;
+                    scraperUrlCol = `<div style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${s.scraper_url}"><a href="${s.scraper_url}" target="_blank" class="text-muted" style="text-decoration: underline;">${s.scraper_url}</a></div>`;
                     
                     // Status badge
                     statusBadge = '<span class="status-pill status-new">Nooit gedraaid</span>';

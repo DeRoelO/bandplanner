@@ -48,6 +48,7 @@ class Venue(Base):
     name = Column(String, unique=True, index=True, nullable=False)
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    city = Column(String, nullable=True)
     category = Column(String, nullable=False)  # 'small', 'medium', 'large'
     url = Column(String, nullable=True)
     aliases = Column(String, nullable=True)  # Comma-separated alternative names for matching

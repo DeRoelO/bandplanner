@@ -191,6 +191,13 @@ def apply_automatic_migrations(db_engine):
                 conn.execute(text("ALTER TABLE user_config ADD COLUMN imap_enabled BOOLEAN DEFAULT 0"))
                 
             conn.commit()
+            
+            # Venues Table city migration
+            columns_venues = [c["name"] for c in inspector.get_columns("venues")]
+            if "city" not in columns_venues:
+                conn.execute(text("ALTER TABLE venues ADD COLUMN city VARCHAR"))
+                conn.commit()
+                
             print("Automatische database schema-migratie voltooid.")
     except Exception as err:
         print(f"Fout bij uitvoeren van automatische database migratie: {err}")
@@ -408,6 +415,7 @@ def create_venue(data: VenueCreateUpdate, background_tasks: BackgroundTasks, db:
         name=data.name,
         latitude=lat,
         longitude=lon,
+        city=data.city,
         category=data.category,
         url=data.url,
         aliases=data.aliases,
@@ -455,6 +463,7 @@ def update_venue(venue_id: int, data: VenueCreateUpdate, background_tasks: Backg
             raise HTTPException(status_code=400, detail=f"Kon coördinaten voor '{data.city}' niet vinden via OpenStreetMap.")
             
     venue.name = data.name
+    venue.city = data.city
     if lat is not None:
         venue.latitude = lat
     if lon is not None:

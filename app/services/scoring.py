@@ -103,7 +103,7 @@ def calculate_genre_match_score(artist_genres: List[str], top_genres_freq: dict)
     normalized_weight = (total_weight / len(artist_genres)) / max_freq
     return min(10.0, normalized_weight * 10.0)
 
-def score_concert(db: Session, concert: Concert, top_genres_freq: dict, user_config: Optional[dict] = None) -> float:
+def score_concert(db: Session, concert: Concert, top_genres_freq: dict, user_config: Optional[dict] = None, allow_spotify_lookup: bool = True) -> float:
     """
     Berekent de totale match-score voor een concert.
     """
@@ -148,7 +148,7 @@ def score_concert(db: Session, concert: Concert, top_genres_freq: dict, user_con
     pref = db.query(ArtistPreference).filter(ArtistPreference.name.ilike(concert.artist)).first()
     
     # Als we de artiest niet kennen, proberen we hem op te zoeken op Spotify
-    if not pref:
+    if not pref and allow_spotify_lookup:
         pref = lookup_artist_on_spotify(db, concert.artist)
         
     if pref:
@@ -205,7 +205,7 @@ def score_all_new_concerts(db: Session) -> List[Concert]:
     high_match_concerts = []
     
     for c in new_concerts:
-        score = score_concert(db, c, top_genres_freq, user_config)
+        score = score_concert(db, c, top_genres_freq, user_config, allow_spotify_lookup=False)
         c.calculated_score = score
         # Zet status naar 'new' (we bewaren de status, maar de score is nu berekend)
         # We kunnen ze direct beoordelen als 'geïnteresseerd' als ze heel hoog scoren, 

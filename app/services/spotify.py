@@ -4,7 +4,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import ArtistPreference
+from app.models import ArtistPreference, Concert
 from app.services.config_manager import load_user_config, save_user_config
 
 def get_spotify_oauth(db: Session = None, redirect_uri: str = None) -> SpotifyOAuth:
@@ -158,3 +158,53 @@ def sync_spotify_preferences(db: Session) -> int:
         
     db.commit()
     return len(artist_data)
+
+
+def enrich_unknown_artists(db: Session, limit: int = 30):
+    """
+    Zoekt artiesten uit de Concerten tabel op via Spotify die nog niet in ArtistPreference staan,
+    en herberekent de match-scores van die concerten.
+    """
+    import time
+    from app.services.scoring import lookup_artist_on_spotify, score_concert
+    from app.services.config_manager import load_user_config
+    
+    # Verkrijg unieke artiestennamen van concerten die nog niet gecached zijn
+    subquery = db.query(ArtistPreference.name)
+    artists_to_lookup = db.query(Concert.artist)\
+        .filter(~Concert.artist.in_(subquery))\
+        .group_by(Concert.artist)\
+        .limit(limit)\
+        .all()
+        
+    if not artists_to_lookup:
+        return
+        
+    artist_names = [a[0] for a in artists_to_lookup]
+    print(f"[Spotify Enrich] Start verrijken van {len(artist_names)} artiesten: {artist_names}")
+    
+    user_config = load_user_config()
+    top_artists = db.query(ArtistPreference).filter(ArtistPreference.source == "top_artist").all()
+    top_genres_freq = {}
+    for ta in top_artists:
+        if ta.genres:
+            for genre in ta.genres:
+                top_genres_freq[genre.lower()] = top_genres_freq.get(genre.lower(), 0) + ta.user_score
+                
+    enriched_count = 0
+    for artist_name in artist_names:
+        try:
+            # Dit zoekt op Spotify en slaat op in ArtistPreference in de DB
+            pref = lookup_artist_on_spotify(db, artist_name)
+            if pref:
+                enriched_count += 1
+                # Vind alle concerten van deze artiest en update hun score
+                concerts = db.query(Concert).filter(Concert.artist == artist_name).all()
+                for c in concerts:
+                    c.calculated_score = score_concert(db, c, top_genres_freq, user_config, allow_spotify_lookup=False)
+                db.commit()
+            time.sleep(0.15) # Beleefd blijven tegen de API
+        except Exception as e:
+            print(f"[Spotify Enrich] Fout bij verrijken '{artist_name}': {e}")
+            
+    print(f"[Spotify Enrich] Klaar. {enriched_count} artiesten verrijkt.")

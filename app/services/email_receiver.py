@@ -185,7 +185,7 @@ def fetch_and_parse_emails(db: Session) -> int:
                         db.refresh(new_concert)
                         
                         # Scoren
-                        score = score_concert(db, new_concert, top_genres_freq, user_config)
+                        score = score_concert(db, new_concert, top_genres_freq, user_config, allow_spotify_lookup=False)
                         new_concert.calculated_score = score
                         db.commit()
                         

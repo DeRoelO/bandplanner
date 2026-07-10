@@ -92,6 +92,18 @@ async def background_sync_loop():
                         db.close()
                 await asyncio.to_thread(notify_task)
                 
+            # 5. Enrich unknown artists in the background via Spotify
+            def enrich_task():
+                db = SessionLocal()
+                try:
+                    from app.services.spotify import enrich_unknown_artists
+                    enrich_unknown_artists(db)
+                except Exception as enrich_err:
+                    print(f"[Background Task] Fout bij verrijken artiesten: {enrich_err}")
+                finally:
+                    db.close()
+            await asyncio.to_thread(enrich_task)
+                
         except asyncio.CancelledError:
             print("[Background Task] Synchronisatie loop geannuleerd.")
             break
@@ -426,6 +438,8 @@ def update_venue(venue_id: int, data: VenueCreateUpdate, background_tasks: Backg
                 v = sync_db.query(Venue).filter(Venue.id == venue.id).first()
                 if v:
                     run_custom_scraper(sync_db, v)
+                    from app.services.spotify import enrich_unknown_artists
+                    enrich_unknown_artists(sync_db)
             finally:
                 sync_db.close()
         background_tasks.add_task(initial_run)
@@ -447,6 +461,8 @@ def trigger_venue_scraper_run(venue_id: int, background_tasks: BackgroundTasks, 
             v = sync_db.query(Venue).filter(Venue.id == venue_id).first()
             if v:
                 run_custom_scraper(sync_db, v, force_heal=force_heal)
+                from app.services.spotify import enrich_unknown_artists
+                enrich_unknown_artists(sync_db)
         finally:
             sync_db.close()
             

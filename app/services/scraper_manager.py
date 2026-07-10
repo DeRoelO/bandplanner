@@ -314,7 +314,7 @@ def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> L
             db.refresh(new_concert)
             
             # Bereken match score
-            score = score_concert(db, new_concert, top_genres_freq, user_config)
+            score = score_concert(db, new_concert, top_genres_freq, user_config, allow_spotify_lookup=False)
             new_concert.calculated_score = score
             db.commit()
             db.refresh(new_concert)

@@ -52,6 +52,14 @@ class Venue(Base):
     url = Column(String, nullable=True)
     aliases = Column(String, nullable=True)  # Comma-separated alternative names for matching
 
+    # Custom Scraper fields
+    scraper_url = Column(String, nullable=True)
+    scraper_code = Column(String, nullable=True)
+    scraper_enabled = Column(Boolean, nullable=False, default=True)
+    scraper_last_run = Column(DateTime, nullable=True)
+    scraper_last_status = Column(String, nullable=True)  # 'success', 'failed'
+    scraper_error_log = Column(String, nullable=True)
+
     concerts = relationship("Concert", back_populates="venue")
 
 class ArtistPreference(Base):
@@ -86,16 +94,3 @@ class Concert(Base):
 
     venue = relationship("Venue", back_populates="concerts")
 
-
-class CustomScraper(Base):
-    __tablename__ = "custom_scrapers"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True, nullable=False)
-    url = Column(String, nullable=False)
-    python_code = Column(String, nullable=True)
-    enabled = Column(Boolean, nullable=False, default=True)
-    last_run = Column(DateTime, nullable=True)
-    last_status = Column(String, nullable=True)  # 'success', 'failed'
-    error_log = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)

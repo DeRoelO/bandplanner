@@ -10,8 +10,7 @@ from google import genai
 from google.genai import types
 
 from app.config import settings
-from app.database import SessionLocal
-from app.models import CustomScraper, Concert, Venue, ArtistPreference
+from app.models import Concert, Venue, ArtistPreference
 from app.services.config_manager import load_user_config
 from app.services.rss import find_or_create_venue
 from app.services.scoring import score_concert
@@ -128,7 +127,7 @@ def generate_scraper_code(name: str, url: str, html: str) -> str:
         
     return code
 
-def heal_scraper_code(scraper: CustomScraper, html: str, error_msg: str) -> str:
+def heal_scraper_code(venue: Venue, html: str, error_msg: str) -> str:
     """
     Triggert Gemini om een falend scraper-script te repareren op basis van de foutmelding en HTML.
     """
@@ -141,7 +140,7 @@ def heal_scraper_code(scraper: CustomScraper, html: str, error_msg: str) -> str:
     cleaned_html = clean_html_for_gemini(html)
     
     prompt = f"""
-    Je bent een expert Python scraper ontwikkelaar. Een door jou gegenereerd scraper-script voor '{scraper.name}' ({scraper.url}) is gefaald of heeft 0 resultaten opgeleverd.
+    Je bent een expert Python scraper ontwikkelaar. Een door jou gegenereerd scraper-script voor '{venue.name}' ({venue.scraper_url}) is gefaald of heeft 0 resultaten opgeleverd.
     
     De foutmelding/reden is:
     ```
@@ -150,7 +149,7 @@ def heal_scraper_code(scraper: CustomScraper, html: str, error_msg: str) -> str:
     
     Hier is de huidige Python code van het script dat faalt:
     ```python
-    {scraper.python_code}
+    {venue.scraper_code}
     ```
     
     Hier is een actueel deel van de HTML van de pagina:
@@ -161,8 +160,8 @@ def heal_scraper_code(scraper: CustomScraper, html: str, error_msg: str) -> str:
     Pas de BeautifulSoup selector(s) of datum-parsing logica aan zodat het script weer correct werkt.
     Volg dezelfde regels:
     1. Functie moet `scrape(html: str) -> list[dict]` heten.
-    2. Velden: 'artist', 'date', 'venue' (moet '{scraper.name}' zijn), 'price', 'url'.
-    3. Maak links absoluut met `urllib.parse.urljoin('{scraper.url}', link)`.
+    2. Velden: 'artist', 'date', 'venue' (moet '{venue.name}' zijn), 'price', 'url'.
+    3. Maak links absoluut met `urllib.parse.urljoin('{venue.scraper_url}', link)`.
     
     Geef ALTIJD en UITSLUITEND de rauwe Python code terug. Geen markdown blocks zoals ```python, geen inleiding, geen uitleg. Gewoon direct de code.
     """
@@ -183,40 +182,40 @@ def heal_scraper_code(scraper: CustomScraper, html: str, error_msg: str) -> str:
         
     return code
 
-def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = False) -> List[Concert]:
+def run_custom_scraper(db: Session, venue: Venue, force_heal: bool = False) -> List[Concert]:
     """
     Haalt de HTML op, voert de scraper uit, repareert indien nodig (Self-Healing)
     en slaat de gevonden concerten op.
     """
-    print(f"[Scraper Manager] Start scraper '{scraper.name}' ({scraper.url})...")
+    print(f"[Scraper Manager] Start scraper '{venue.name}' ({venue.scraper_url})...")
     
     # 1. Haal HTML op
     try:
-        response = requests.get(scraper.url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        response = requests.get(venue.scraper_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         if response.status_code != 200:
             raise Exception(f"HTTP Status {response.status_code}")
         html = response.text
     except Exception as e:
         error_msg = f"Fout bij ophalen van website: {e}"
         print(f"[Scraper Manager] {error_msg}")
-        scraper.last_run = datetime.now()
-        scraper.last_status = "failed"
-        scraper.error_log = error_msg
+        venue.scraper_last_run = datetime.now()
+        venue.scraper_last_status = "failed"
+        venue.scraper_error_log = error_msg
         db.commit()
         return []
 
     # Indien er nog geen code is, genereer deze eerst
-    if not scraper.python_code:
+    if not venue.scraper_code:
         try:
             print(f"[Scraper Manager] Geen code gevonden. Genereren via Gemini...")
-            scraper.python_code = generate_scraper_code(scraper.name, scraper.url, html)
+            venue.scraper_code = generate_scraper_code(venue.name, venue.scraper_url, html)
             db.commit()
         except Exception as e:
             error_msg = f"Fout bij initialiseren scraper-code via Gemini: {e}"
             print(f"[Scraper Manager] {error_msg}")
-            scraper.last_run = datetime.now()
-            scraper.last_status = "failed"
-            scraper.error_log = error_msg
+            venue.scraper_last_run = datetime.now()
+            venue.scraper_last_status = "failed"
+            venue.scraper_error_log = error_msg
             db.commit()
             return []
 
@@ -226,20 +225,20 @@ def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = F
     error_msg = ""
     
     try:
-        results = execute_scraper_code(scraper.python_code, html)
+        results = execute_scraper_code(venue.scraper_code, html)
         if not results:
             # Als er 0 resultaten zijn, kan het zijn dat de selectors zijn veranderd (dus falen/healen)
             raise ValueError("Het script heeft 0 concerten kunnen extraheren.")
     except Exception as e:
         error_occurred = True
         error_msg = f"{e}\n{traceback.format_exc()}"
-        print(f"[Scraper Manager] Scraper '{scraper.name}' faalde: {e}")
+        print(f"[Scraper Manager] Scraper '{venue.name}' faalde: {e}")
 
     # 3. Self-Healing activeert bij fouten
     if error_occurred or force_heal:
         try:
-            print(f"[Scraper Manager] Auto-reparatie (Self-Healing) activeren voor '{scraper.name}'...")
-            fixed_code = heal_scraper_code(scraper, html, error_msg if not force_heal else "Handmatige reparatie geforceerd.")
+            print(f"[Scraper Manager] Auto-reparatie (Self-Healing) activeren voor '{venue.name}'...")
+            fixed_code = heal_scraper_code(venue, html, error_msg if not force_heal else "Handmatige reparatie geforceerd.")
             print(f"[Scraper Manager] Nieuwe code ontvangen. Testen...")
             
             # Test de nieuwe code
@@ -248,17 +247,17 @@ def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = F
                 raise ValueError("Gecorrigeerde code retourneerde nog steeds 0 resultaten.")
                 
             # Als de nieuwe code werkt, sla hem op!
-            scraper.python_code = fixed_code
+            venue.scraper_code = fixed_code
             error_occurred = False
             error_msg = ""
-            print(f"[Scraper Manager] Scraper '{scraper.name}' succesvol gerepareerd door Gemini!")
+            print(f"[Scraper Manager] Scraper '{venue.name}' succesvol gerepareerd door Gemini!")
         except Exception as heal_err:
             # Healing ook mislukt
             error_msg = f"Originele fout:\n{error_msg}\n\nReparatie mislukt:\n{heal_err}"
-            print(f"[Scraper Manager] Self-Healing mislukt voor '{scraper.name}': {heal_err}")
-            scraper.last_run = datetime.now()
-            scraper.last_status = "failed"
-            scraper.error_log = error_msg
+            print(f"[Scraper Manager] Self-Healing mislukt voor '{venue.name}': {heal_err}")
+            venue.scraper_last_run = datetime.now()
+            venue.scraper_last_status = "failed"
+            venue.scraper_error_log = error_msg
             db.commit()
             return []
 
@@ -275,8 +274,8 @@ def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = F
                 top_genres_freq[genre.lower()] = top_genres_freq.get(genre.lower(), 0) + ta.user_score
 
     for item in results:
-        # Zoek of maak podium
-        venue = find_or_create_venue(db, item["venue"])
+        # Zoek of maak podium (gebruik item venue of val terug op huidige venue)
+        venue_obj = find_or_create_venue(db, item.get("venue") or venue.name)
         
         # Parse datum
         try:
@@ -295,7 +294,7 @@ def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = F
         # Controleer of het concert al bestaat
         exists = db.query(Concert).filter(
             Concert.artist.ilike(item["artist"]),
-            Concert.venue_id == venue.id,
+            Concert.venue_id == venue_obj.id,
             Concert.date >= start_of_day,
             Concert.date < end_of_day
         ).first()
@@ -303,11 +302,11 @@ def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = F
         if not exists:
             new_concert = Concert(
                 artist=item["artist"],
-                venue_id=venue.id,
+                venue_id=venue_obj.id,
                 date=concert_date,
                 price=item["price"],
                 url=item["url"],
-                source=f"scraper_{scraper.name.lower().replace(' ', '_')}",
+                source=f"scraper_{venue.name.lower().replace(' ', '_')}",
                 status="new"
             )
             db.add(new_concert)
@@ -323,10 +322,10 @@ def run_custom_scraper(db: Session, scraper: CustomScraper, force_heal: bool = F
             added_concerts.append(new_concert)
             
     # Update scraper status
-    scraper.last_run = datetime.now()
-    scraper.last_status = "success"
-    scraper.error_log = None
+    venue.scraper_last_run = datetime.now()
+    venue.scraper_last_status = "success"
+    venue.scraper_error_log = None
     db.commit()
     
-    print(f"[Scraper Manager] Scraper '{scraper.name}' afgerond. {len(added_concerts)} nieuwe concerten toegevoegd.")
+    print(f"[Scraper Manager] Scraper '{venue.name}' afgerond. {len(added_concerts)} nieuwe concerten toegevoegd.")
     return added_concerts

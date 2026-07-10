@@ -31,10 +31,6 @@
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
                     <span>Gemini Parser</span>
                 </a>
-                <a class="nav-item" data-tab="scrapers">
-                    <i class="fa-solid fa-spider"></i>
-                    <span>Custom Scrapers</span>
-                </a>
                 <a class="nav-item" data-tab="settings">
                     <i class="fa-solid fa-sliders"></i>
                     <span>Instellingen</span>
@@ -105,6 +101,7 @@
                                     <th>Coördinaten</th>
                                     <th>Website</th>
                                     <th>Aliases (matching)</th>
+                                    <th>Scraper URL &amp; Status</th>
                                     <th style="text-align: right;">Acties</th>
                                 </tr>
                             </thead>
@@ -145,39 +142,6 @@
                     <p class="text-muted" id="parser-results-summary" style="margin-bottom: 15px;"></p>
                     <div class="grid" id="parser-results-grid">
                         <!-- Extracted concert cards will be displayed here -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- TAB: SCRAPERS -->
-            <div class="tab-content" id="tab-scrapers">
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Custom Scrapers (Self-Healing)</h2>
-                        <button class="btn btn-primary btn-sm" id="btn-add-scraper">
-                            <i class="fa-solid fa-plus"></i> Scraper Toevoegen
-                        </button>
-                    </div>
-                    <p class="text-muted" style="margin-bottom: 20px;">
-                        Voeg de programmapagina van een podium of theater toe. Gemini zal automatisch een BeautifulSoup parser-script genereren. Mocht de layout van de pagina veranderen, dan repareert Gemini de scraper automatisch op de achtergrond!
-                    </p>
-                    
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Naam</th>
-                                    <th>URL</th>
-                                    <th>Status</th>
-                                    <th>Laatste Run</th>
-                                    <th>Foutmelding</th>
-                                    <th style="text-align: right;">Acties</th>
-                                </tr>
-                            </thead>
-                            <tbody id="scrapers-table-body">
-                                <!-- Dynamic Scrapers List will be injected here -->
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -405,36 +369,23 @@
                     <label for="venue-form-aliases">Aliases (Komma-gescheiden alternatieve namen)</label>
                     <input type="text" id="venue-form-aliases" placeholder="Bijv. Paradiso Amsterdam, Paradiso Grote Zaal">
                 </div>
+                
+                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+                <h4 style="margin-bottom: 10px; color: #ffffff;"><i class="fa-solid fa-spider"></i> Custom Website Scraper (Optioneel)</h4>
+                
+                <div class="form-group">
+                    <label for="venue-form-scraper-url">Scraper URL (programmapagina)</label>
+                    <input type="text" id="venue-form-scraper-url" placeholder="Bijv. https://www.oltgoffert.nl/programma">
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="venue-form-scraper-enabled" checked style="width: auto; margin: 0; cursor: pointer;">
+                    <label for="venue-form-scraper-enabled" style="margin: 0; cursor: pointer;">Scraper Actief</label>
+                </div>
+                <input type="hidden" id="venue-form-scraper-code">
+
                 <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
                     <button type="button" class="btn btn-secondary" id="btn-cancel-venue">Annuleren</button>
                     <button type="submit" class="btn btn-primary">Opslaan</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- MODAL: SCRAPER TOEVOEGEN -->
-    <div class="modal" id="modal-scraper">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Custom Scraper Toevoegen</h3>
-                <span class="modal-close" id="btn-close-scraper-modal">&times;</span>
-            </div>
-            <form id="scraper-form">
-                <div class="form-group">
-                    <label for="scraper-form-name">Naam Podium</label>
-                    <input type="text" id="scraper-form-name" required placeholder="Bijv. OLT Goffert">
-                </div>
-                <div class="form-group">
-                    <label for="scraper-form-url">Programma Website URL</label>
-                    <input type="text" id="scraper-form-url" required placeholder="https://www.oltgoffert.nl/programma">
-                </div>
-                <p class="text-muted" style="margin-top: 10px; font-size: 13px;">
-                    <i class="fa-solid fa-circle-info"></i> Na het opslaan zal Gemini de website analyseren en de BeautifulSoup parser genereren. Dit kan tot 15 seconden duren.
-                </p>
-                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-                    <button type="button" class="btn btn-secondary" id="btn-cancel-scraper">Annuleren</button>
-                    <button type="submit" class="btn btn-primary" id="btn-submit-scraper">Opslaan</button>
                 </div>
             </form>
         </div>

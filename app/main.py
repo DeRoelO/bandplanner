@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.database import get_db, SessionLocal
-from app.models import Concert, Venue, UserConfig, ArtistPreference, CustomScraper
+from app.models import Concert, Venue, UserConfig, ArtistPreference
 from app.services.config_manager import load_user_config, save_user_config
 from app.services.spotify import get_spotify_oauth, sync_spotify_preferences
 from app.services.rss import parse_rss_feeds
@@ -42,12 +42,12 @@ async def background_sync_loop():
                 
                 # 2b. Run custom scrapers
                 from app.services.scraper_manager import run_custom_scraper
-                scrapers = db.query(CustomScraper).filter(CustomScraper.enabled == True).all()
-                for scraper in scrapers:
+                venues_with_scrapers = db.query(Venue).filter(Venue.scraper_url != None, Venue.scraper_enabled == True).all()
+                for venue in venues_with_scrapers:
                     try:
-                        await asyncio.to_thread(run_custom_scraper, db, scraper)
+                        await asyncio.to_thread(run_custom_scraper, db, venue)
                     except Exception as scraper_err:
-                        print(f"[Background Task] Fout bij draaien scraper '{scraper.name}': {scraper_err}")
+                        print(f"[Background Task] Fout bij draaien scraper voor '{venue.name}': {scraper_err}")
                 
                 # 3. Score nieuwe concerten
                 high_matches = await asyncio.to_thread(score_all_new_concerts, db)
@@ -81,6 +81,27 @@ def apply_automatic_migrations(db_engine):
     from sqlalchemy import inspect, text
     inspector = inspect(db_engine)
     
+    # Check if venues columns need migrating
+    if inspector.has_table("venues"):
+        venue_cols = [c["name"] for c in inspector.get_columns("venues")]
+        try:
+            with db_engine.connect() as conn:
+                if "scraper_url" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_url VARCHAR"))
+                if "scraper_code" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_code VARCHAR"))
+                if "scraper_enabled" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_enabled BOOLEAN DEFAULT 1"))
+                if "scraper_last_run" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_last_run DATETIME"))
+                if "scraper_last_status" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_last_status VARCHAR"))
+                if "scraper_error_log" not in venue_cols:
+                    conn.execute(text("ALTER TABLE venues ADD COLUMN scraper_error_log VARCHAR"))
+                conn.commit()
+        except Exception as err:
+            print(f"Fout bij migreren venues tabel: {err}")
+
     # Als de tabel er nog niet is, doet create_all het werk
     if not inspector.has_table("user_config"):
         return
@@ -213,22 +234,17 @@ class VenueCreateUpdate(BaseModel):
     category: str
     url: Optional[str] = None
     aliases: Optional[str] = ""
+    
+    # Scraper config
+    scraper_url: Optional[str] = None
+    scraper_code: Optional[str] = None
+    scraper_enabled: Optional[bool] = True
 
 class ConcertStatusUpdate(BaseModel):
     status: str  # 'new', 'ignored', 'interested'
 
 class EmailParseRequest(BaseModel):
     email_text: str
-
-class CustomScraperCreate(BaseModel):
-    name: str
-    url: str
-
-class CustomScraperUpdate(BaseModel):
-    name: str
-    url: str
-    python_code: Optional[str] = None
-    enabled: bool
 
 # --- API Routes ---
 # 1. Configuur Routes
@@ -323,7 +339,7 @@ def get_venues(db: Session = Depends(get_db)):
     return db.query(Venue).order_by(Venue.name).all()
 
 @app.post("/api/venues")
-def create_venue(data: VenueCreateUpdate, db: Session = Depends(get_db)):
+def create_venue(data: VenueCreateUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     exists = db.query(Venue).filter(Venue.name.ilike(data.name)).first()
     if exists:
         raise HTTPException(status_code=400, detail="Podium met deze naam bestaat al.")
@@ -332,14 +348,29 @@ def create_venue(data: VenueCreateUpdate, db: Session = Depends(get_db)):
     db.add(venue)
     db.commit()
     db.refresh(venue)
+    
+    if venue.scraper_url:
+        from app.services.scraper_manager import run_custom_scraper
+        def initial_run():
+            sync_db = SessionLocal()
+            try:
+                v = sync_db.query(Venue).filter(Venue.id == venue.id).first()
+                if v:
+                    run_custom_scraper(sync_db, v)
+            finally:
+                sync_db.close()
+        background_tasks.add_task(initial_run)
+        
     return venue
 
 @app.put("/api/venues/{venue_id}")
-def update_venue(venue_id: int, data: VenueCreateUpdate, db: Session = Depends(get_db)):
+def update_venue(venue_id: int, data: VenueCreateUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     venue = db.query(Venue).filter(Venue.id == venue_id).first()
     if not venue:
         raise HTTPException(status_code=404, detail="Podium niet gevonden.")
         
+    had_scraper = venue.scraper_url is not None
+    
     venue.name = data.name
     venue.latitude = data.latitude
     venue.longitude = data.longitude
@@ -347,9 +378,48 @@ def update_venue(venue_id: int, data: VenueCreateUpdate, db: Session = Depends(g
     venue.url = data.url
     venue.aliases = data.aliases
     
+    # Scraper config
+    venue.scraper_url = data.scraper_url
+    venue.scraper_code = data.scraper_code
+    venue.scraper_enabled = data.scraper_enabled if data.scraper_enabled is not None else True
+    
     db.commit()
     db.refresh(venue)
+    
+    if venue.scraper_url and (not had_scraper or data.scraper_url != venue.scraper_url):
+        from app.services.scraper_manager import run_custom_scraper
+        def initial_run():
+            sync_db = SessionLocal()
+            try:
+                v = sync_db.query(Venue).filter(Venue.id == venue.id).first()
+                if v:
+                    run_custom_scraper(sync_db, v)
+            finally:
+                sync_db.close()
+        background_tasks.add_task(initial_run)
+        
     return venue
+
+@app.post("/api/venues/{venue_id}/run_scraper")
+def trigger_venue_scraper_run(venue_id: int, background_tasks: BackgroundTasks, force_heal: bool = False, db: Session = Depends(get_db)):
+    venue = db.query(Venue).filter(Venue.id == venue_id).first()
+    if not venue:
+        raise HTTPException(status_code=404, detail="Podium niet gevonden.")
+    if not venue.scraper_url:
+        raise HTTPException(status_code=400, detail="Dit podium heeft geen scraper geconfigureerd.")
+        
+    from app.services.scraper_manager import run_custom_scraper
+    def manual_run():
+        sync_db = SessionLocal()
+        try:
+            v = sync_db.query(Venue).filter(Venue.id == venue_id).first()
+            if v:
+                run_custom_scraper(sync_db, v, force_heal=force_heal)
+        finally:
+            sync_db.close()
+            
+    background_tasks.add_task(manual_run)
+    return {"status": "sync_triggered"}
 
 @app.delete("/api/venues/{venue_id}")
 def delete_venue(venue_id: int, db: Session = Depends(get_db)):
@@ -424,12 +494,12 @@ def trigger_feed_sync(background_tasks: BackgroundTasks, db: Session = Depends(g
                 
             # Run custom scrapers
             from app.services.scraper_manager import run_custom_scraper
-            scrapers = sync_db.query(CustomScraper).filter(CustomScraper.enabled == True).all()
-            for scraper in scrapers:
+            venues_with_scrapers = sync_db.query(Venue).filter(Venue.scraper_url != None, Venue.scraper_enabled == True).all()
+            for venue in venues_with_scrapers:
                 try:
-                    run_custom_scraper(sync_db, scraper)
+                    run_custom_scraper(sync_db, venue)
                 except Exception as scraper_err:
-                    print(f"Error running scraper '{scraper.name}' during manual sync: {scraper_err}")
+                    print(f"Error running scraper for '{venue.name}' during manual sync: {scraper_err}")
                 
             high_matches = score_all_new_concerts(sync_db)
             if high_matches:
@@ -575,84 +645,6 @@ def get_ics_feed(db: Session = Depends(get_db)):
         cal.add_component(event)
         
     return Response(content=cal.to_ical(), media_type="text/calendar")
-
-# 6. Custom Scrapers Routes
-@app.get("/api/scrapers")
-def get_scrapers(db: Session = Depends(get_db)):
-    return db.query(CustomScraper).all()
-
-@app.post("/api/scrapers")
-def create_scraper(data: CustomScraperCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    exists = db.query(CustomScraper).filter(CustomScraper.name == data.name).first()
-    if exists:
-        raise HTTPException(status_code=400, detail="Er bestaat al een scraper met deze naam.")
-        
-    scraper = CustomScraper(
-        name=data.name,
-        url=data.url,
-        enabled=True
-    )
-    db.add(scraper)
-    db.commit()
-    db.refresh(scraper)
-    
-    # Run de scraper één keer in de achtergrond om code te genereren en de eerste concerten op te halen
-    from app.services.scraper_manager import run_custom_scraper
-    def initial_run():
-        sync_db = SessionLocal()
-        try:
-            s = sync_db.query(CustomScraper).filter(CustomScraper.id == scraper.id).first()
-            if s:
-                run_custom_scraper(sync_db, s)
-        finally:
-            sync_db.close()
-            
-    background_tasks.add_task(initial_run)
-    return scraper
-
-@app.post("/api/scrapers/{scraper_id}/run")
-def trigger_scraper_run(scraper_id: int, background_tasks: BackgroundTasks, force_heal: bool = False, db: Session = Depends(get_db)):
-    scraper = db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
-    if not scraper:
-        raise HTTPException(status_code=404, detail="Scraper niet gevonden.")
-        
-    from app.services.scraper_manager import run_custom_scraper
-    def manual_run():
-        sync_db = SessionLocal()
-        try:
-            s = sync_db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
-            if s:
-                run_custom_scraper(sync_db, s, force_heal=force_heal)
-        finally:
-            sync_db.close()
-            
-    background_tasks.add_task(manual_run)
-    return {"status": "sync_triggered"}
-
-@app.put("/api/scrapers/{scraper_id}")
-def update_scraper(scraper_id: int, data: CustomScraperUpdate, db: Session = Depends(get_db)):
-    scraper = db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
-    if not scraper:
-        raise HTTPException(status_code=404, detail="Scraper niet gevonden.")
-        
-    scraper.name = data.name
-    scraper.url = data.url
-    scraper.python_code = data.python_code
-    scraper.enabled = data.enabled
-    
-    db.commit()
-    db.refresh(scraper)
-    return scraper
-
-@app.delete("/api/scrapers/{scraper_id}")
-def delete_scraper(scraper_id: int, db: Session = Depends(get_db)):
-    scraper = db.query(CustomScraper).filter(CustomScraper.id == scraper_id).first()
-    if not scraper:
-        raise HTTPException(status_code=404, detail="Scraper niet gevonden.")
-        
-    db.delete(scraper)
-    db.commit()
-    return {"status": "success"}
 
 # Mount Static Files (voor frontend)
 static_dir = os.path.join(os.path.dirname(__file__), "static")

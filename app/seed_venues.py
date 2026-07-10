@@ -70,12 +70,10 @@ def seed_data(db: Session):
         db.add(default_config)
         print("Default user configuration seeded.")
 
-    # Seed venues
-    seeded_count = 0
-    for v_data in VENUES_SEED:
-        exists = db.query(Venue).filter(Venue.name == v_data["name"]).first()
-        if not exists:
-            # We also check if another venue has the same location to prevent duplication
+    # Seed venues only if table is empty
+    if db.query(Venue).count() == 0:
+        seeded_count = 0
+        for v_data in VENUES_SEED:
             venue = Venue(
                 name=v_data["name"],
                 latitude=v_data["latitude"],
@@ -87,11 +85,11 @@ def seed_data(db: Session):
             db.add(venue)
             seeded_count += 1
             
-    if seeded_count > 0:
-        db.commit()
-        print(f"Seeded {seeded_count} venues successfully.")
+        if seeded_count > 0:
+            db.commit()
+            print(f"Seeded {seeded_count} venues successfully.")
     else:
-        print("Venues database is already seeded.")
+        print("Venues database is already seeded and has records. Seeding skipped.")
 
 if __name__ == "__main__":
     Base.metadata.create_all(bind=engine)

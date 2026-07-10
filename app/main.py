@@ -273,8 +273,9 @@ class ConfigUpdate(BaseModel):
 
 class VenueCreateUpdate(BaseModel):
     name: str
-    latitude: float
-    longitude: float
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    city: Optional[str] = None
     category: str
     url: Optional[str] = None
     aliases: Optional[str] = ""
@@ -388,7 +389,32 @@ def create_venue(data: VenueCreateUpdate, background_tasks: BackgroundTasks, db:
     if exists:
         raise HTTPException(status_code=400, detail="Podium met deze naam bestaat al.")
         
-    venue = Venue(**data.model_dump())
+    lat = data.latitude
+    lon = data.longitude
+    
+    if (lat is None or lon is None or (lat == 0.0 and lon == 0.0)) and data.city:
+        from app.services.distance import geocode_location
+        coords = geocode_location(data.city)
+        if coords:
+            lat, lon = coords
+        else:
+            raise HTTPException(status_code=400, detail=f"Kon coördinaten voor '{data.city}' niet vinden via OpenStreetMap.")
+    elif lat is None or lon is None:
+        # Utrecht fallback
+        lat = 52.0907
+        lon = 5.1214
+
+    venue = Venue(
+        name=data.name,
+        latitude=lat,
+        longitude=lon,
+        category=data.category,
+        url=data.url,
+        aliases=data.aliases,
+        scraper_url=data.scraper_url,
+        scraper_code=data.scraper_code,
+        scraper_enabled=data.scraper_enabled if data.scraper_enabled is not None else True
+    )
     db.add(venue)
     db.commit()
     db.refresh(venue)
@@ -401,6 +427,8 @@ def create_venue(data: VenueCreateUpdate, background_tasks: BackgroundTasks, db:
                 v = sync_db.query(Venue).filter(Venue.id == venue.id).first()
                 if v:
                     run_custom_scraper(sync_db, v)
+                    from app.services.spotify import enrich_unknown_artists
+                    enrich_unknown_artists(sync_db)
             finally:
                 sync_db.close()
         background_tasks.add_task(initial_run)
@@ -415,9 +443,22 @@ def update_venue(venue_id: int, data: VenueCreateUpdate, background_tasks: Backg
         
     had_scraper = venue.scraper_url is not None
     
+    lat = data.latitude
+    lon = data.longitude
+    
+    if (lat is None or lon is None or (lat == 0.0 and lon == 0.0)) and data.city:
+        from app.services.distance import geocode_location
+        coords = geocode_location(data.city)
+        if coords:
+            lat, lon = coords
+        else:
+            raise HTTPException(status_code=400, detail=f"Kon coördinaten voor '{data.city}' niet vinden via OpenStreetMap.")
+            
     venue.name = data.name
-    venue.latitude = data.latitude
-    venue.longitude = data.longitude
+    if lat is not None:
+        venue.latitude = lat
+    if lon is not None:
+        venue.longitude = lon
     venue.category = data.category
     venue.url = data.url
     venue.aliases = data.aliases

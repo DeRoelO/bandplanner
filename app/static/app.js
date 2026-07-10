@@ -76,6 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const venueFormCategory = document.getElementById("venue-form-category");
     const venueFormLat = document.getElementById("venue-form-lat");
     const venueFormLon = document.getElementById("venue-form-lon");
+    const venueFormCity = document.getElementById("venue-form-city");
     const venueFormUrl = document.getElementById("venue-form-url");
     const venueFormAliases = document.getElementById("venue-form-aliases");
     const btnCloseModal = document.getElementById("btn-close-modal");
@@ -460,6 +461,7 @@ document.addEventListener("DOMContentLoaded", () => {
             venueFormCategory.value = venue.category;
             venueFormLat.value = venue.latitude;
             venueFormLon.value = venue.longitude;
+            venueFormCity.value = ""; // Leeg bij bewerken tenzij ze willen overschrijven
             venueFormUrl.value = venue.url || "";
             venueFormAliases.value = venue.aliases || "";
         } else {
@@ -467,9 +469,10 @@ document.addEventListener("DOMContentLoaded", () => {
             venueIdInput.value = "";
             venueForm.reset();
             
-            // Default coördinaten Utrecht
-            venueFormLat.value = 52.0907;
-            venueFormLon.value = 5.1214;
+            // Geen default coords prefillen in formulier zodat ze Stad kunnen gebruiken
+            venueFormLat.value = "";
+            venueFormLon.value = "";
+            venueFormCity.value = "";
         }
         venueModal.classList.add("active");
     }
@@ -487,8 +490,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const payload = {
             name: venueFormName.value.trim(),
             category: venueFormCategory.value,
-            latitude: parseFloat(venueFormLat.value),
-            longitude: parseFloat(venueFormLon.value),
+            latitude: venueFormLat.value ? parseFloat(venueFormLat.value) : null,
+            longitude: venueFormLon.value ? parseFloat(venueFormLon.value) : null,
+            city: venueFormCity.value.trim() || null,
             url: venueFormUrl.value.trim() || null,
             aliases: venueFormAliases.value.trim() || "",
             
